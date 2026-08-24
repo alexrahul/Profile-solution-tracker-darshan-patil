@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile Solutions Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-box">PS</div>
+      <div class="brand-text">PROFILE<br><b>SOLUTIONS</b></div>
+    </div>
+
+    <button id="dashboardVisibilityBtn" class="data-visibility-toggle sidebar-visibility-toggle" type="button">👁‍🗨 Hide Data</button>
+
+    <nav id="navMenu">
+      <button class="nav-item active" data-page="dashboard"><span class="nav-icon">⌂</span><span>Dashboard</span></button>
+      <button class="nav-item" data-page="accounts"><span class="nav-icon">₹</span><span>Accounts</span></button>
+      <button class="nav-item" data-page="projects"><span class="nav-icon">▦</span><span>Projects</span></button>
+      <button class="nav-item" data-page="cctv"><span class="nav-icon">◉</span><span>CCTV</span></button>
+      <button class="nav-item" data-page="reports"><span class="nav-icon">◴</span><span>Reports</span></button>
+      <button class="nav-item admin-only hidden" data-page="data"><span class="nav-icon">▤</span><span>Data</span></button>
+      <button class="nav-item admin-only hidden" data-page="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button id="adminLoginBtn" class="sidebar-action"><span>⇥</span><span>Admin Login</span></button>
+      <button id="logoutBtn" class="sidebar-action hidden"><span>↪</span><span>Logout</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageHeading">Good Afternoon, Reema!</h1>
+        <p id="pageSubheading">Here's your overview</p>
+      </div>
+      <div class="top-actions">
+        <button class="notification" type="button">♧<span>3</span></button>
+        <div class="avatar">R</div>
+        <div class="profile-name">Reema Shah⌄</div>
+      </div>
+    </header>
+
+    <div id="apiNotice" class="api-notice hidden"></div>
+
+    <section id="dashboardPage" class="page active">
+      <div id="dashboardHiddenMessage" class="dashboard-hidden-state hidden">
+        <div class="hidden-state-icon">◉</div>
+        <h2>Dashboard Data Hidden</h2>
+        <p>Use “Show Data” in the header to restore the dashboard.</p>
+      </div>
+
+      <div id="dashboardContent" class="dashboard-screen">
+        <article class="card calendar-card compact-dashboard-card">
+          <div class="card-title"><span>▣</span><h3>Day Calendar</h3></div>
+          <div class="calendar-header">
+            <button id="prevMonth" type="button">‹</button>
+            <b id="calendarMonth"></b>
+            <button id="nextMonth" type="button">›</button>
+          </div>
+          <div class="week-row" id="weekRow"></div>
+          <div class="calendar-grid" id="calendarGrid"></div>
+          <div class="today-strip">
+            <span id="todayLabel"></span>
+            <button id="todayBtn" type="button">Today</button>
+          </div>
+        </article>
+
+        <article class="card meeting-card compact-dashboard-card">
+          <div class="card-title"><span>▣</span><h3>Meeting Schedule</h3><a href="#" onclick="return false">View All</a></div>
+          <small class="dashboard-date-chip" data-dashboard-date></small>
+          <div id="meetingList" class="compact-card-body"></div>
+        </article>
+
+        <article class="card lunch-card compact-dashboard-card">
+          <div class="card-title"><span>♧</span><h3>Daily Lunch Meet</h3><a href="#" onclick="return false">View All</a></div>
+          <small class="dashboard-date-chip" data-dashboard-date></small>
+          <div id="departmentSchedule" class="lunch-row single-lunch-row"></div>
+        </article>
+
+        <article class="card tasks-card compact-dashboard-card">
+          <div class="card-title red-title"><span>☑</span><h3>Tasks</h3></div>
+          <small class="dashboard-date-chip" data-dashboard-date></small>
+          <div id="taskList" class="compact-card-body"></div>
+        </article>
+
+        <article class="card notes-card compact-dashboard-card">
+          <div class="card-title"><span>▤</span><h3>Quick Notes</h3></div>
+          <small class="dashboard-date-chip" data-dashboard-date></small>
+          <div id="quickNotes" class="compact-card-body"></div>
+        </article>
+
+        <article class="card reminders-card compact-dashboard-card">
+          <div class="card-title blue-title"><span>♟</span><h3>Urgent Reminders</h3></div>
+          <small class="dashboard-date-chip" data-dashboard-date></small>
+          <div id="reminderList" class="compact-card-body"></div>
+          <a href="#" onclick="return false" class="view-reminders">View All Reminders →</a>
+        </article>
+
+        <article class="card manpower-image-card manpower-primary-card">
+          <div class="card-title blue-title">
+            <span>♟</span>
+            <h3>Manpower Attendance (Overall)</h3>
+            <small class="dashboard-date-chip image-date-chip" data-dashboard-date></small>
+          </div>
+          <div id="manpowerImageViewer" class="manpower-image-viewer"></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="accountsPage" class="page">
+      <article class="card placeholder-module-card">
+        <div class="placeholder-icon">₹</div>
+        <h2>Accounts</h2>
+        <p id="accountsModuleMessage">Accounts Module Under Development</p>
+      </article>
+    </section>
+
+    <section id="projectsPage" class="page">
+      <article class="card placeholder-module-card">
+        <div class="placeholder-icon">▦</div>
+        <h2>Projects</h2>
+        <p id="projectsModuleMessage">Projects Module Under Development</p>
+      </article>
+    </section>
+
+    <section id="cctvPage" class="page">
+      <article class="card placeholder-module-card">
+        <div class="placeholder-icon">◉</div>
+        <h2>CCTV</h2>
+        <p id="cctvModuleMessage">CCTV Module Under Development</p>
+      </article>
+    </section>
+
+    <section id="dataPage" class="page">
+      <div class="admin-banner">
+        <div><h2>Data</h2><p>Admin control panel for information visible on the dashboard.</p></div>
+        <span>ADMIN ONLY</span>
+      </div>
+      <div class="data-tabs" id="dataTabs"></div>
+
+      <div class="data-layout">
+        <article class="card data-form-card">
+          <div class="card-title"><span>▤</span><h3 id="dataFormTitle">Calendar Data</h3></div>
+          <form id="dynamicDataForm"></form>
+          <div id="formMessage"></div>
+        </article>
+
+        <article class="card bulk-card">
+          <div class="card-title"><span>⇧</span><h3>Bulk Upload</h3></div>
+          <p>Upload CSV data for the currently selected data type.</p>
+          <input id="bulkFile" type="file" accept=".csv">
+          <button id="bulkUploadBtn" class="primary full-width">Upload CSV</button>
+          <button id="downloadTemplateBtn" class="outline full-width">Download Template</button>
+        </article>
+      </div>
+
+      <article class="card records-card">
+        <div class="records-header">
+          <div><h3>Existing Records</h3><p>Edit or delete data from the selected module.</p></div>
+          <input id="recordSearch" placeholder="Search records...">
+        </div>
+        <div class="table-scroll"><table id="recordsTable"></table></div>
+      </article>
+    </section>
+
+    <section id="reportsPage" class="page">
+      <div class="admin-banner">
+        <div><h2>Reports</h2><p>Daily, weekly and monthly dashboard reports.</p></div>
+        <span>REPORTS</span>
+      </div>
+      <div class="report-grid">
+        <article class="card report-card"><b>▤</b><h3>Daily Report</h3><p>Current-day dashboard summary.</p><button class="outline report-btn" data-type="daily">Generate</button></article>
+        <article class="card report-card"><b>▤</b><h3>Weekly Report</h3><p>7-day dashboard summary.</p><button class="outline report-btn" data-type="weekly">Generate</button></article>
+        <article class="card report-card"><b>▤</b><h3>Monthly Report</h3><p>Monthly dashboard summary.</p><button class="outline report-btn" data-type="monthly">Generate</button></article>
+      </div>
+      <article class="card report-output"><h3>Report Preview</h3><pre id="reportPreview">Select a report above.</pre></article>
+    </section>
+
+    <section id="settingsPage" class="page">
+      <article class="card settings-card">
+        <h2>Settings</h2>
+        <p>Admin-only configuration.</p>
+        <div class="setting-row"><b>Public Dashboard</b><span>Enabled</span></div>
+        <div class="setting-row"><b>Dashboard Preference</b><span>Database-backed for Admin users</span></div>
+        <div class="setting-row"><b>Database</b><span>Supabase PostgreSQL</span></div>
+        <div class="setting-row"><b>Authentication</b><span>JWT / Node.js</span></div>
+      </article>
+
+      <article class="card settings-card calendar-connect-card">
+        <h2>Connect Calendar</h2>
+        <p>Meetings from a connected calendar automatically appear on the dashboard.</p>
+        <div id="calendarConnectMessage" class="calendar-connect-message hidden"></div>
+        <div class="calendar-provider-row">
+          <div class="calendar-provider-info">
+            <b>Google Calendar</b>
+            <span id="googleCalendarStatus" class="status-pill">Not Connected</span>
+          </div>
+          <button id="googleCalendarBtn" type="button" class="primary">Connect Google Calendar</button>
+        </div>
+        <div class="calendar-provider-row">
+          <div class="calendar-provider-info">
+            <b>Microsoft Calendar</b>
+            <span id="microsoftCalendarStatus" class="status-pill">Not Connected</span>
+          </div>
+          <button id="microsoftCalendarBtn" type="button" class="primary">Connect Microsoft Calendar</button>
+        </div>
+      </article>
+    </section>
+  </main>
+</div>
+
+<div id="loginModal" class="modal hidden">
+  <div class="modal-card">
+    <button id="closeLogin" class="close-btn" type="button">×</button>
+    <div class="login-logo">PS</div>
+    <h2>Admin Login</h2>
+    <p>Sign in to manage dashboard data.</p>
+    <form id="loginForm">
+      <label>Email<input id="loginEmail" type="email" required></label>
+      <label>Password<input id="loginPassword" type="password" required></label>
+      <button class="primary full-width">Login</button>
+    </form>
+    <div id="loginMessage"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
