@@ -303,7 +303,7 @@ body.dashboard-mode .main {
 }
 
 .card-title h3 {
-  font-size: 12px;
+  font-size: 14px;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -313,7 +313,7 @@ body.dashboard-mode .main {
 .card-title>a {
   margin-left: auto;
   color: #60A5FA;
-  font-size: 9px;
+  font-size: 10px;
   text-decoration: none;
   white-space: nowrap
 }
@@ -333,7 +333,7 @@ body.dashboard-mode .main {
 .dashboard-date-chip {
   display: block;
   color: #94A3B8;
-  font-size: 8px;
+  font-size: 9px;
   margin: 5px 0 6px
 }
 
@@ -354,7 +354,7 @@ body.dashboard-mode .main {
 }
 
 .compact-dashboard-card {
-  padding: 9px;
+  padding: 10px;
   min-width: 0;
   min-height: 0;
   overflow: hidden
@@ -410,7 +410,7 @@ body.dashboard-mode .main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 14px;
   margin: 5px 4px 5px
 }
 
@@ -430,7 +430,7 @@ body.dashboard-mode .main {
 }
 
 .week-row span {
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 600;
   margin-bottom: 4px;
   color: #94A3B8
@@ -441,10 +441,10 @@ body.dashboard-mode .main {
 }
 
 .calendar-grid span {
-  height: 20px;
+  height: 22px;
   display: grid;
   place-items: center;
-  font-size: 9px;
+  font-size: 10px;
   color: #D1D5DB;
   border-radius: 50%
 }
@@ -465,7 +465,7 @@ body.dashboard-mode .main {
 }
 
 .today-strip {
-  min-height: 28px;
+  min-height: 30px;
   background: #0F1A2D;
   border: 1px solid #1E3A5F;
   border-radius: 7px;
@@ -474,7 +474,7 @@ body.dashboard-mode .main {
   display: flex;
   align-items: center;
   color: #93C5FD;
-  font-size: 8px;
+  font-size: 9px;
   line-height: 1.25
 }
 
@@ -492,26 +492,26 @@ body.dashboard-mode .main {
   color: #60A5FA;
   border-radius: 5px;
   padding: 4px 6px;
-  font-size: 8px
+  font-size: 9px
 }
 
 .meeting-row {
   display: grid;
-  grid-template-columns: 54px 1fr 46px;
+  grid-template-columns: 58px 1fr 50px;
   align-items: center;
-  min-height: 44px;
+  min-height: 46px;
   border-bottom: 1px solid var(--border);
   gap: 5px
 }
 
 .meeting-row>b {
-  font-size: 8px;
+  font-size: 9px;
   color: #93C5FD
 }
 
 .meeting-row strong {
   display: block;
-  font-size: 9px;
+  font-size: 10px;
   color: #F9FAFB
 }
 
@@ -528,7 +528,7 @@ body.dashboard-mode .main {
 .meeting-row small {
   display: block;
   color: #9CA3AF;
-  font-size: 7px;
+  font-size: 8px;
   margin-top: 2px
 }
 
@@ -538,7 +538,7 @@ body.dashboard-mode .main {
   padding: 4px;
   border-radius: 5px;
   text-align: center;
-  font-size: 7px;
+  font-size: 8px;
   overflow: hidden;
   text-overflow: ellipsis
 }
@@ -582,38 +582,29 @@ body.dashboard-mode .main {
 }
 
 .lunch-item b {
-  font-size: 9px
+  font-size: 10px
 }
 
 .lunch-item small {
-  font-size: 7px;
+  font-size: 8px;
   color: #9CA3AF;
   margin-top: 3px
 }
 
 .lunch-item span {
-  font-size: 8px;
+  font-size: 9px;
   margin-top: 8px;
   line-height: 1.45;
   color: #D1D5DB
 }
 
-.lunch-item i {
-  display: block;
-  width: 65%;
-  height: 5px;
-  border-radius: 5px;
-  background: #3B82F6;
-  margin-top: 10px
-}
-
 .task-row {
   display: grid;
-  grid-template-columns: 16px 48px 1fr 46px;
+  grid-template-columns: 16px 52px 1fr 48px;
   align-items: center;
-  min-height: 31px;
+  min-height: 33px;
   border-bottom: 1px solid var(--border);
-  font-size: 7.5px;
+  font-size: 8.5px;
   gap: 3px
 }
 
@@ -628,13 +619,13 @@ body.dashboard-mode .main {
 }
 
 .task-status {
-  font-size: 7px;
+  font-size: 8px;
   color: #9CA3AF;
   text-align: right
 }
 
 .note-row {
-  font-size: 8px;
+  font-size: 9px;
   margin: 8px 0;
   color: #D1D5DB;
   line-height: 1.35
@@ -646,11 +637,11 @@ body.dashboard-mode .main {
 
 .reminder-row {
   display: grid;
-  grid-template-columns: 45px 7px 1fr;
+  grid-template-columns: 50px 7px 1fr;
   align-items: center;
-  min-height: 29px;
+  min-height: 31px;
   border-bottom: 1px solid var(--border);
-  font-size: 7.5px
+  font-size: 8.5px
 }
 
 .reminder-row time {
@@ -668,7 +659,7 @@ body.dashboard-mode .main {
   text-align: center;
   color: #60A5FA;
   text-decoration: none;
-  font-size: 8px;
+  font-size: 9px;
   margin-top: 6px
 }
 
@@ -709,7 +700,7 @@ body.dashboard-mode .main {
   place-items: center;
   text-align: center;
   color: #9CA3AF;
-  font-size: 10px;
+  font-size: 11px;
   padding: 18px
 }
 
@@ -727,14 +718,14 @@ body.dashboard-mode .main {
 
 .manpower-image-meta b {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis
 }
 
 .manpower-image-meta p {
-  font-size: 8px;
+  font-size: 9px;
   color: #9CA3AF;
   margin: 2px 0 0;
   white-space: nowrap;

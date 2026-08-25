@@ -499,7 +499,7 @@ function renderDashboard() {
 
   const d = (dashboardData.departments || [])[0];
   $("departmentSchedule").innerHTML = d
-    ? `<div class="lunch-item"><div class="lunch-icon">♟</div><b>${esc(d.department || "")}</b><small>Department</small><span>${esc(d.start || "")} –<br>${esc(d.end || "")}</span><small>${esc(d.location || "")}</small><i></i></div>`
+    ? `<div class="lunch-item"><div class="lunch-icon">♟</div><b>${esc(d.department || "")}</b><small>Department</small><span>${esc(d.start || "")} –<br>${esc(d.end || "")}</span><small>${esc(d.location || "")}</small></div>`
     : `<div class="lunch-item"><div class="manpower-image-empty">No lunch schedule</div></div>`;
 
   $("taskList").innerHTML = (dashboardData.tasks || []).slice(0, 5).map(t =>
