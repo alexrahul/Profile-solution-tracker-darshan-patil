@@ -199,16 +199,24 @@
         <div class="calendar-provider-row">
           <div class="calendar-provider-info">
             <b>Google Calendar</b>
+            <span id="googleCalendarEmail" class="calendar-provider-email"></span>
             <span id="googleCalendarStatus" class="status-pill">Not Connected</span>
           </div>
-          <button id="googleCalendarBtn" type="button" class="primary">Connect Google Calendar</button>
+          <div class="calendar-provider-actions">
+            <button id="googleCalendarSyncBtn" type="button" class="outline hidden">Sync Now</button>
+            <button id="googleCalendarBtn" type="button" class="primary">Connect Google Calendar</button>
+          </div>
         </div>
         <div class="calendar-provider-row">
           <div class="calendar-provider-info">
             <b>Microsoft Calendar</b>
+            <span id="microsoftCalendarEmail" class="calendar-provider-email"></span>
             <span id="microsoftCalendarStatus" class="status-pill">Not Connected</span>
           </div>
-          <button id="microsoftCalendarBtn" type="button" class="primary">Connect Microsoft Calendar</button>
+          <div class="calendar-provider-actions">
+            <button id="microsoftCalendarSyncBtn" type="button" class="outline hidden">Sync Now</button>
+            <button id="microsoftCalendarBtn" type="button" class="primary">Connect Microsoft Calendar</button>
+          </div>
         </div>
       </article>
     </section>

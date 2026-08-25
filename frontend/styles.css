@@ -1106,6 +1106,17 @@ td {
   font-size: 10px
 }
 
+.calendar-provider-email {
+  color: var(--muted, #9CA3AF);
+  font-size: 9px
+}
+
+.calendar-provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px
+}
+
 .status-pill {
   font-size: 8px;
   padding: 4px 8px;

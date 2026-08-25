@@ -10,7 +10,8 @@ const GOOGLE = {
   authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
   tokenUrl: "https://oauth2.googleapis.com/token",
   eventsUrl: "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-  scope: "https://www.googleapis.com/auth/calendar.readonly",
+  userInfoUrl: "https://www.googleapis.com/oauth2/v2/userinfo",
+  scope: "https://www.googleapis.com/auth/calendar.readonly email",
   clientId: () => process.env.GOOGLE_CLIENT_ID,
   clientSecret: () => process.env.GOOGLE_CLIENT_SECRET
 };
@@ -19,7 +20,8 @@ const MICROSOFT = {
   authUrl: () => `https://login.microsoftonline.com/${process.env.MS_TENANT_ID || "common"}/oauth2/v2.0/authorize`,
   tokenUrl: () => `https://login.microsoftonline.com/${process.env.MS_TENANT_ID || "common"}/oauth2/v2.0/token`,
   eventsUrl: "https://graph.microsoft.com/v1.0/me/events",
-  scope: "offline_access Calendars.Read",
+  userInfoUrl: "https://graph.microsoft.com/v1.0/me",
+  scope: "offline_access Calendars.Read User.Read",
   clientId: () => process.env.MS_CLIENT_ID,
   clientSecret: () => process.env.MS_CLIENT_SECRET
 };
@@ -83,6 +85,16 @@ export async function exchangeCode(provider, code) {
     refreshToken: data.refresh_token || null,
     expiresIn: data.expires_in
   };
+}
+
+export async function fetchAccountEmail(provider, accessToken) {
+  const cfg = providerConfig(provider);
+  const response = await fetch(cfg.userInfoUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return null;
+  const data = await response.json();
+  if (provider === "GOOGLE") return data.email || null;
+  if (provider === "MICROSOFT") return data.mail || data.userPrincipalName || null;
+  return null;
 }
 
 export async function refreshAccessToken(provider, refreshToken) {

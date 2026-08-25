@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS calendar_connections(
  refresh_token_encrypted TEXT,
  token_expiry TIMESTAMPTZ,
  calendar_id VARCHAR(255) NOT NULL DEFAULT 'primary',
+ connected_email VARCHAR(255),
  connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
  is_active BOOLEAN NOT NULL DEFAULT TRUE,
  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

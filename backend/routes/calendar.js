@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { query } from "../db.js";
 import { requireAdmin } from "../auth.js";
 import { encryptToken } from "../cryptoUtil.js";
-import { buildAuthUrl, exchangeCode } from "../services/calendarProviders.js";
+import { buildAuthUrl, exchangeCode, fetchAccountEmail } from "../services/calendarProviders.js";
 import { syncConnection } from "../services/calendarSync.js";
 
 const router = Router();
@@ -65,13 +65,21 @@ router.get("/callback/:provider", async (req, res) => {
     const tokens = await exchangeCode(provider, String(req.query.code));
     const tokenExpiry = new Date(Date.now() + (tokens.expiresIn || 3600) * 1000);
 
+    let connectedEmail = null;
+    try {
+      connectedEmail = await fetchAccountEmail(provider, tokens.accessToken);
+    } catch (emailErr) {
+      console.error(`[calendar] ${provider} email lookup failed:`, emailErr.message);
+    }
+
     const result = await query(
-      `insert into calendar_connections(user_id,provider,access_token_encrypted,refresh_token_encrypted,token_expiry,is_active,connected_at)
-       values($1,$2,$3,$4,$5,true,now())
+      `insert into calendar_connections(user_id,provider,access_token_encrypted,refresh_token_encrypted,token_expiry,connected_email,is_active,connected_at)
+       values($1,$2,$3,$4,$5,$6,true,now())
        on conflict(user_id,provider) do update
        set access_token_encrypted=excluded.access_token_encrypted,
            refresh_token_encrypted=coalesce(excluded.refresh_token_encrypted,calendar_connections.refresh_token_encrypted),
            token_expiry=excluded.token_expiry,
+           connected_email=excluded.connected_email,
            is_active=true,
            connected_at=now()
        returning *`,
@@ -80,7 +88,8 @@ router.get("/callback/:provider", async (req, res) => {
         provider,
         encryptToken(tokens.accessToken),
         tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
-        tokenExpiry
+        tokenExpiry,
+        connectedEmail
       ]
     );
 
@@ -100,10 +109,25 @@ router.get("/callback/:provider", async (req, res) => {
 router.get("/connections", requireAdmin, async (req, res, next) => {
   try {
     const result = await query(
-      `select id,provider,connected_at,is_active from calendar_connections where user_id=$1 order by provider`,
+      `select id,provider,connected_at,connected_email,is_active from calendar_connections where user_id=$1 order by provider`,
       [req.user.sub]
     );
     res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/connections/:id/sync", requireAdmin, async (req, res, next) => {
+  try {
+    const existing = await query(`select * from calendar_connections where id=$1 limit 1`, [req.params.id]);
+    const connection = existing.rows[0];
+    if (!connection) return res.status(404).json({ message: "Connection not found" });
+    if (connection.user_id !== req.user.sub) return res.status(403).json({ message: "Not your calendar connection" });
+    if (!connection.is_active) return res.status(409).json({ message: "Connection is inactive. Reconnect to resume syncing." });
+
+    const synced = await syncConnection(connection);
+    res.json({ synced });
   } catch (err) {
     next(err);
   }

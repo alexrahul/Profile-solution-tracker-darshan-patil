@@ -290,19 +290,49 @@ async function loadCalendarConnections() {
 
 function updateCalendarProviderUI(provider, connection) {
   const statusEl = $(`${provider}CalendarStatus`);
+  const emailEl = $(`${provider}CalendarEmail`);
   const btn = $(`${provider}CalendarBtn`);
+  const syncBtn = $(`${provider}CalendarSyncBtn`);
   const label = provider === "google" ? "Google" : "Microsoft";
 
   if (connection) {
     statusEl.textContent = "Connected";
     statusEl.classList.add("connected");
+    emailEl.textContent = connection.connected_email || "";
     btn.textContent = `Disconnect ${label} Calendar`;
     btn.onclick = () => disconnectCalendar(connection.id);
+    syncBtn.classList.remove("hidden");
+    syncBtn.disabled = false;
+    syncBtn.textContent = "Sync Now";
+    syncBtn.onclick = () => syncCalendarNow(connection.id, syncBtn);
   } else {
     statusEl.textContent = "Not Connected";
     statusEl.classList.remove("connected");
+    emailEl.textContent = "";
     btn.textContent = `Connect ${label} Calendar`;
     btn.onclick = () => connectCalendar(provider);
+    syncBtn.classList.add("hidden");
+    syncBtn.onclick = null;
+  }
+}
+
+async function syncCalendarNow(id, syncBtn) {
+  const msg = $("calendarConnectMessage");
+  syncBtn.disabled = true;
+  syncBtn.textContent = "Syncing...";
+  try {
+    const result = await api(`/api/calendar/connections/${id}/sync`, { method: "POST" });
+    msg.classList.remove("hidden");
+    msg.className = "calendar-connect-message success";
+    msg.textContent = `Synced ${result.synced} event${result.synced === 1 ? "" : "s"} just now.`;
+    await refreshCalendarMonthEvents();
+  } catch (err) {
+    msg.classList.remove("hidden");
+    msg.className = "calendar-connect-message form-error";
+    msg.textContent = err.message;
+  } finally {
+    syncBtn.disabled = false;
+    syncBtn.textContent = "Sync Now";
   }
 }
 
