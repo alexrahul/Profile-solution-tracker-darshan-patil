@@ -495,7 +495,9 @@ function renderDashboard() {
   renderCalendar();
 
   const mergedMeetings = [...(dashboardData.meetings || []), ...(dashboardData.calendarEvents || [])];
-  $("meetingList").innerHTML = mergedMeetings.slice(0, 5).map(renderMeetingRow).join("") || emptyCompact("No meetings");
+  // Render every meeting; the #meetingList container fills the card's remaining
+  // height and scrolls vertically when the rows exceed the available space.
+  $("meetingList").innerHTML = mergedMeetings.map(renderMeetingRow).join("") || emptyCompact("No meetings");
 
   const d = (dashboardData.departments || [])[0];
   $("departmentSchedule").innerHTML = d
