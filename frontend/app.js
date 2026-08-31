@@ -495,7 +495,7 @@ function renderDashboard() {
   renderCalendar();
 
   const mergedMeetings = [...(dashboardData.meetings || []), ...(dashboardData.calendarEvents || [])];
-  $("meetingList").innerHTML = mergedMeetings.slice(0, 4).map(renderMeetingRow).join("") || emptyCompact("No meetings");
+  $("meetingList").innerHTML = mergedMeetings.slice(0, 5).map(renderMeetingRow).join("") || emptyCompact("No meetings");
 
   const d = (dashboardData.departments || [])[0];
   $("departmentSchedule").innerHTML = d
