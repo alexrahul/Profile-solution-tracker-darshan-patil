@@ -18,6 +18,16 @@ const cfg = {
       description: { required: false, type: "text" }
     }
   },
+  accounts: {
+    table: "accounts_data",
+    orderBy: "t_month asc",
+    fields: {
+      t_month: { required: true, type: "month", aliases: ["month"] },
+      sales_order_amount: { required: true, type: "number" },
+      purchase_order_amount: { required: true, type: "number" },
+      invoice_amount: { required: true, type: "number" }
+    }
+  },
   meetings: {
     table: "meeting_schedule",
     fields: {
@@ -113,6 +123,15 @@ function normalizeValue(field, rule, raw) {
     }
     return value;
   }
+  if (rule.type === "month") {
+    const value = String(raw).trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
+      const e = new Error(`${field} must be in YYYY-MM format`);
+      e.status = 400;
+      throw e;
+    }
+    return value;
+  }
   if (rule.type === "number") {
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) {
@@ -137,7 +156,20 @@ function normalizeValue(field, rule, raw) {
 }
 function normalizePayload(c, body = {}) {
   const columns = Object.keys(c.fields);
-  const values = columns.map(field => normalizeValue(field, c.fields[field], body[field]));
+  const values = columns.map(field => {
+    const rule = c.fields[field];
+    let raw = body[field];
+    if ((raw === undefined || raw === null || raw === "") && Array.isArray(rule.aliases)) {
+      for (const alias of rule.aliases) {
+        const candidate = body[alias];
+        if (candidate !== undefined && candidate !== null && candidate !== "") {
+          raw = candidate;
+          break;
+        }
+      }
+    }
+    return normalizeValue(field, rule, raw);
+  });
   return { columns, values };
 }
 function insertSql(c, columns) {
@@ -256,7 +288,7 @@ router.post("/manpower-images/bulk", (req, res) => {
 router.get("/:module", async (req, res, next) => {
   try {
     const c = getCfg(req.params.module);
-    const result = await query(`select * from ${qid(c.table)} order by created_at desc,id desc`);
+    const result = await query(`select * from ${qid(c.table)} order by ${c.orderBy || "created_at desc,id desc"}`);
     res.json(result.rows);
   } catch (e) {
     next(e);

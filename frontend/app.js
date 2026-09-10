@@ -24,6 +24,12 @@ const dataModules = {
     {name:"event_title",label:"Event Title",type:"text",required:true},
     {name:"description",label:"Event Description",type:"textarea"}
   ]},
+  accounts:{label:"Accounts Data", endpoint:"accounts", fields:[
+    {name:"t_month",label:"Month (YYYY-MM)",type:"month",required:true},
+    {name:"sales_order_amount",label:"Sales Order Amount",type:"number",required:true},
+    {name:"purchase_order_amount",label:"Purchase Order Amount",type:"number",required:true},
+    {name:"invoice_amount",label:"Invoice Amount",type:"number",required:true}
+  ]},
   meetings:{label:"Meeting Schedule Data", endpoint:"meetings", fields:[
     {name:"meeting_date",label:"Date",type:"date",required:true},
     {name:"meeting_time",label:"Time",type:"text",required:true},
@@ -79,6 +85,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupViewAllControls();
   setupDashboardVisibility();
   setupCalendarIntegration();
+  setupAccounts();
 
   await restoreAuthSession();
   if (currentUser) await loadDashboardPreference();
@@ -223,7 +230,7 @@ async function setPage(page) {
 
   const titles = {
     dashboard:["Good Afternoon, Reema!","Here's your overview"],
-    accounts:["Accounts","Accounts Module"],
+    accounts:["Accounts","Sales Orders, Purchase Orders & Invoices"],
     projects:["Projects","Projects Module"],
     cctv:["CCTV","CCTV Module"],
     data:["Data","Manage all information that feeds the dashboard"],
@@ -240,7 +247,9 @@ async function setPage(page) {
     loadRecords();
   } else if (page === "settings") {
     loadCalendarConnections();
-  } else if (["accounts","projects","cctv"].includes(page)) {
+  } else if (page === "accounts") {
+    loadAccountsDashboard();
+  } else if (["projects","cctv"].includes(page)) {
     loadPlaceholderModule(page);
   }
 }
@@ -1071,3 +1080,287 @@ function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 }
 function escAttr(v) { return esc(v); }
+
+/* ------------------------------------------------------------------ *
+ * Accounts module - KPI dashboard (totals + monthly trend)
+ * All figures are computed live from /api/public/accounts, which returns
+ * one row per month. Aggregation and range filtering happen here.
+ * ------------------------------------------------------------------ */
+
+const ACCOUNTS_UNIT_LABEL = "₹ in Lakhs";
+const ACCOUNTS_UNIT_SUFFIX = "L";
+const ACCOUNTS_SERIES = [
+  { key: "salesOrder", label: "Sales Orders", color: "#3B82F6" },
+  { key: "purchaseOrder", label: "Purchase Orders", color: "#F59E0B" },
+  { key: "invoice", label: "Invoices", color: "#22C55E" }
+];
+
+let accountsRows = [];
+let accountsUnitLabel = ACCOUNTS_UNIT_LABEL;
+let accountsRangeMode = "12";
+let accountsHiddenSeries = new Set();
+
+function setupAccounts() {
+  const addBtn = $("accountsAddDataBtn");
+  if (addBtn) addBtn.onclick = openAccountsDataEntry;
+
+  const toggle = $("accountsRangeToggle");
+  if (toggle) {
+    toggle.querySelectorAll("[data-range]").forEach(btn => {
+      btn.onclick = () => applyAccountsRangeMode(btn.dataset.range);
+    });
+  }
+}
+
+function setAccountsView(view) {
+  $("accountsLoading").classList.toggle("hidden", view !== "loading");
+  $("accountsEmpty").classList.toggle("hidden", view !== "empty");
+  $("accountsDashboard").classList.toggle("hidden", view !== "dashboard");
+}
+
+async function loadAccountsDashboard() {
+  setAccountsView("loading");
+  $("accountsError").classList.add("hidden");
+
+  try {
+    const result = await api("/api/public/accounts");
+    accountsRows = (result.rows || [])
+      .map(r => ({
+        month: r.month,
+        salesOrder: Number(r.salesOrder) || 0,
+        purchaseOrder: Number(r.purchaseOrder) || 0,
+        invoice: Number(r.invoice) || 0
+      }))
+      .filter(r => /^\d{4}-\d{2}$/.test(r.month || ""))
+      .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
+
+    accountsUnitLabel = result.unitLabel || ACCOUNTS_UNIT_LABEL;
+    $("accountsUnitLabel").textContent = accountsUnitLabel;
+
+    if (!accountsRows.length) {
+      setAccountsView("empty");
+      return;
+    }
+
+    setAccountsView("dashboard");
+    initAccountsFilters();
+  } catch (err) {
+    accountsRows = [];
+    setAccountsView("empty");
+    const notice = $("accountsError");
+    notice.classList.remove("hidden");
+    notice.textContent = "Accounts data could not be loaded. " + err.message;
+  }
+}
+
+function initAccountsFilters() {
+  const months = accountsRows.map(r => r.month);
+  const options = months.map(m => `<option value="${escAttr(m)}">${esc(formatAccountsMonth(m))}</option>`).join("");
+  $("accountsFrom").innerHTML = options;
+  $("accountsTo").innerHTML = options;
+
+  $("accountsFrom").onchange = () => {
+    if ($("accountsFrom").value > $("accountsTo").value) $("accountsTo").value = $("accountsFrom").value;
+    accountsRangeMode = "custom";
+    syncAccountsRangeButtons();
+    renderAccounts();
+  };
+  $("accountsTo").onchange = () => {
+    if ($("accountsTo").value < $("accountsFrom").value) $("accountsFrom").value = $("accountsTo").value;
+    accountsRangeMode = "custom";
+    syncAccountsRangeButtons();
+    renderAccounts();
+  };
+
+  applyAccountsRangeMode("12");
+}
+
+function applyAccountsRangeMode(mode) {
+  const months = accountsRows.map(r => r.month);
+  if (!months.length) return;
+  accountsRangeMode = mode;
+
+  if (mode === "all") {
+    $("accountsFrom").value = months[0];
+    $("accountsTo").value = months[months.length - 1];
+  } else {
+    accountsRangeMode = "12";
+    const start = Math.max(0, months.length - 12);
+    $("accountsFrom").value = months[start];
+    $("accountsTo").value = months[months.length - 1];
+  }
+
+  syncAccountsRangeButtons();
+  renderAccounts();
+}
+
+function syncAccountsRangeButtons() {
+  $("accountsRangeToggle").querySelectorAll("[data-range]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.range === accountsRangeMode);
+  });
+}
+
+function getAccountsFiltered() {
+  const from = $("accountsFrom").value;
+  const to = $("accountsTo").value;
+  if (!from || !to) return accountsRows.slice();
+  return accountsRows.filter(r => r.month >= from && r.month <= to);
+}
+
+function renderAccounts() {
+  const rows = getAccountsFiltered();
+  renderAccountsKpis(rows);
+  renderAccountsLegend();
+  renderAccountsChart(rows);
+}
+
+function renderAccountsKpis(rows) {
+  const totals = { salesOrder: 0, purchaseOrder: 0, invoice: 0 };
+  rows.forEach(r => ACCOUNTS_SERIES.forEach(s => { totals[s.key] += r[s.key] || 0; }));
+
+  const latest = rows[rows.length - 1];
+  const prev = rows[rows.length - 2];
+
+  $("accountsKpiRow").innerHTML = ACCOUNTS_SERIES.map(s => {
+    let sub;
+    if (!latest) {
+      sub = `<span class="accounts-kpi-sub muted">No data in selected range</span>`;
+    } else {
+      const current = latest[s.key] || 0;
+      let deltaHtml = "";
+      if (prev) {
+        const change = accountsPctChange(current, prev[s.key] || 0);
+        deltaHtml = ` <span class="accounts-delta ${change.dir}">${esc(change.text)}</span>`;
+      }
+      sub = `<span class="accounts-kpi-sub">${esc(formatAccountsMonth(latest.month))}: ${esc(formatAccountsAmount(current))}${deltaHtml}</span>`;
+    }
+    return `<article class="card accounts-kpi-card">
+        <span class="accounts-kpi-dot" style="background:${s.color}"></span>
+        <h3 class="accounts-kpi-title">Total ${esc(s.label)}</h3>
+        <div class="accounts-kpi-value">${esc(formatAccountsAmount(totals[s.key]))}</div>
+        ${sub}
+      </article>`;
+  }).join("");
+}
+
+// % change vs the previous month in range. Guards previous === 0 so a month
+// that follows a zero month shows "New" instead of dividing by zero.
+function accountsPctChange(current, previous) {
+  if (previous === 0 && current === 0) return { text: "0.0% vs prev", dir: "flat" };
+  if (previous === 0) return { text: "New vs prev", dir: "up" };
+  const pct = ((current - previous) / previous) * 100;
+  const dir = pct > 0.05 ? "up" : pct < -0.05 ? "down" : "flat";
+  const arrow = dir === "up" ? "▲" : dir === "down" ? "▼" : "▬";
+  return { text: `${arrow} ${Math.abs(pct).toFixed(1)}% vs prev`, dir };
+}
+
+function renderAccountsLegend() {
+  const legend = $("accountsLegend");
+  legend.innerHTML = ACCOUNTS_SERIES.map(s => {
+    const off = accountsHiddenSeries.has(s.key);
+    return `<button type="button" class="accounts-legend-item${off ? " off" : ""}" data-series="${s.key}">
+        <span class="accounts-legend-swatch" style="background:${s.color}"></span>${esc(s.label)}
+      </button>`;
+  }).join("");
+
+  legend.querySelectorAll("[data-series]").forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.series;
+      if (accountsHiddenSeries.has(key)) accountsHiddenSeries.delete(key);
+      else accountsHiddenSeries.add(key);
+      renderAccountsLegend();
+      renderAccountsChart(getAccountsFiltered());
+    };
+  });
+}
+
+// Lightweight hand-rolled SVG line chart (no chart library dependency, matching
+// the rest of the app). Responsive through the viewBox.
+function renderAccountsChart(rows) {
+  const wrap = $("accountsChart");
+  const visible = ACCOUNTS_SERIES.filter(s => !accountsHiddenSeries.has(s.key));
+
+  if (!rows.length) {
+    wrap.innerHTML = `<div class="accounts-empty-inline">No data in the selected range.</div>`;
+    return;
+  }
+
+  const W = 920, H = 360, padL = 64, padR = 20, padT = 18, padB = 48;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const n = rows.length;
+
+  let maxV = 0;
+  rows.forEach(r => visible.forEach(s => { maxV = Math.max(maxV, r[s.key] || 0); }));
+  const niceMax = accountsNiceMax(maxV || 1);
+
+  const xAt = i => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = v => padT + plotH - (v / niceMax) * plotH;
+
+  const steps = 5;
+  let grid = "";
+  for (let i = 0; i <= steps; i++) {
+    const gv = (niceMax / steps) * i;
+    const gy = yAt(gv).toFixed(1);
+    grid += `<line x1="${padL}" y1="${gy}" x2="${W - padR}" y2="${gy}" class="accounts-grid-line" />`;
+    grid += `<text x="${padL - 10}" y="${(Number(gy) + 4).toFixed(1)}" class="accounts-axis-label" text-anchor="end">${esc(accountsShortNum(gv))}</text>`;
+  }
+
+  const stepX = Math.max(1, Math.ceil(n / 8));
+  let xLabels = "";
+  rows.forEach((r, i) => {
+    if (i % stepX === 0 || i === n - 1) {
+      xLabels += `<text x="${xAt(i).toFixed(1)}" y="${H - padB + 20}" class="accounts-axis-label" text-anchor="middle">${esc(formatAccountsMonth(r.month))}</text>`;
+    }
+  });
+
+  let series = "";
+  visible.forEach(s => {
+    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(r[s.key] || 0).toFixed(1)}`).join(" ");
+    series += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" />`;
+    series += rows.map((r, i) =>
+      `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(r[s.key] || 0).toFixed(1)}" r="2.6" fill="${s.color}"><title>${esc(formatAccountsMonth(r.month))} — ${esc(s.label)}: ${esc(formatAccountsAmount(r[s.key] || 0))}</title></circle>`
+    ).join("");
+  });
+
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="accounts-chart-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Monthly trend of sales orders, purchase orders and invoices">
+      ${grid}
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" class="accounts-axis-line" />
+      <line x1="${padL}" y1="${padT + plotH}" x2="${W - padR}" y2="${padT + plotH}" class="accounts-axis-line" />
+      ${series}
+      ${xLabels}
+    </svg>`;
+}
+
+function accountsNiceMax(v) {
+  if (v <= 0) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  const base = v / pow;
+  const nice = base <= 1 ? 1 : base <= 2 ? 2 : base <= 2.5 ? 2.5 : base <= 5 ? 5 : 10;
+  return nice * pow;
+}
+
+function accountsShortNum(v) {
+  const abs = Math.abs(v);
+  if (abs >= 1000) return (v / 1000).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + "k";
+  return v.toLocaleString("en-IN", { maximumFractionDigits: abs < 10 ? 1 : 0 });
+}
+
+function formatAccountsMonth(month) {
+  const [y, m] = String(month).split("-").map(Number);
+  if (!y || !m) return String(month);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+function formatAccountsAmount(value) {
+  const v = Number(value) || 0;
+  return `₹ ${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ACCOUNTS_UNIT_SUFFIX}`;
+}
+
+function openAccountsDataEntry() {
+  if (!token) { showLogin(); return; }
+  currentDataTab = "accounts";
+  editingId = null;
+  setupDataTabs();
+  setPage("data");
+}

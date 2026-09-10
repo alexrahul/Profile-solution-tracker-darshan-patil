@@ -205,7 +205,31 @@ router.get("/reports", async (req, res, next) => {
   }
 });
 
-for (const [route, label] of [["accounts","Accounts"],["projects","Projects"],["cctv","CCTV"]]) {
+// Accounts KPI dashboard source data: every monthly financial row, ascending by
+// month. Aggregation and date-range filtering happen client-side on this list.
+router.get("/accounts", async (req, res, next) => {
+  try {
+    const result = await query(
+      `select id,t_month,sales_order_amount,purchase_order_amount,invoice_amount
+       from accounts_data order by t_month asc`
+    );
+    res.json({
+      module: "accounts",
+      unitLabel: "₹ in Lakhs",
+      rows: result.rows.map(r => ({
+        id: r.id,
+        month: r.t_month,
+        salesOrder: Number(r.sales_order_amount),
+        purchaseOrder: Number(r.purchase_order_amount),
+        invoice: Number(r.invoice_amount)
+      }))
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+for (const [route, label] of [["projects","Projects"],["cctv","CCTV"]]) {
   router.get(`/${route}`, (req, res) => {
     res.json({ module: route, status: "under-development", message: `${label} Module Under Development` });
   });
