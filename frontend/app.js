@@ -26,9 +26,9 @@ const dataModules = {
   ]},
   accounts:{label:"Accounts Data", endpoint:"accounts", fields:[
     {name:"t_month",label:"Month (YYYY-MM)",type:"month",required:true},
-    {name:"sales_order_amount",label:"Sales Order Amount",type:"number",required:true},
-    {name:"purchase_order_amount",label:"Purchase Order Amount",type:"number",required:true},
-    {name:"invoice_amount",label:"Invoice Amount",type:"number",required:true}
+    {name:"sales_order_amount",label:"Sales Order Amount (₹ Lakhs)",type:"number",required:true},
+    {name:"purchase_order_amount",label:"Purchase Order Amount (₹ Lakhs)",type:"number",required:true},
+    {name:"invoice_amount",label:"Invoice Amount (₹ Lakhs)",type:"number",required:true}
   ]},
   meetings:{label:"Meeting Schedule Data", endpoint:"meetings", fields:[
     {name:"meeting_date",label:"Date",type:"date",required:true},
@@ -1087,8 +1087,11 @@ function escAttr(v) { return esc(v); }
  * one row per month. Aggregation and range filtering happen here.
  * ------------------------------------------------------------------ */
 
-const ACCOUNTS_UNIT_LABEL = "₹ in Lakhs";
-const ACCOUNTS_UNIT_SUFFIX = "L";
+// Amounts are entered/stored in Lakhs (full precision). The dashboard displays
+// them in Crores: 1 Cr = 100 L, so divide by ACCOUNTS_DISPLAY_DIVISOR for display.
+const ACCOUNTS_UNIT_LABEL = "₹ in Crores";
+const ACCOUNTS_UNIT_SUFFIX = "Cr";
+const ACCOUNTS_DISPLAY_DIVISOR = 100;
 const ACCOUNTS_SERIES = [
   { key: "salesOrder", label: "Sales Orders", color: "#3B82F6" },
   { key: "purchaseOrder", label: "Purchase Orders", color: "#F59E0B" },
@@ -1290,8 +1293,10 @@ function renderAccountsChart(rows) {
   const plotH = H - padT - padB;
   const n = rows.length;
 
+  // Chart geometry and axis labels are in display units (Crores).
+  const div = ACCOUNTS_DISPLAY_DIVISOR;
   let maxV = 0;
-  rows.forEach(r => visible.forEach(s => { maxV = Math.max(maxV, r[s.key] || 0); }));
+  rows.forEach(r => visible.forEach(s => { maxV = Math.max(maxV, (r[s.key] || 0) / div); }));
   const niceMax = accountsNiceMax(maxV || 1);
 
   const xAt = i => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
@@ -1316,10 +1321,10 @@ function renderAccountsChart(rows) {
 
   let series = "";
   visible.forEach(s => {
-    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(r[s.key] || 0).toFixed(1)}`).join(" ");
+    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt((r[s.key] || 0) / div).toFixed(1)}`).join(" ");
     series += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" />`;
     series += rows.map((r, i) =>
-      `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(r[s.key] || 0).toFixed(1)}" r="2.6" fill="${s.color}"><title>${esc(formatAccountsMonth(r.month))} — ${esc(s.label)}: ${esc(formatAccountsAmount(r[s.key] || 0))}</title></circle>`
+      `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt((r[s.key] || 0) / div).toFixed(1)}" r="2.6" fill="${s.color}"><title>${esc(formatAccountsMonth(r.month))} — ${esc(s.label)}: ${esc(formatAccountsAmount(r[s.key] || 0))}</title></circle>`
     ).join("");
   });
 
@@ -1353,7 +1358,7 @@ function formatAccountsMonth(month) {
 }
 
 function formatAccountsAmount(value) {
-  const v = Number(value) || 0;
+  const v = (Number(value) || 0) / ACCOUNTS_DISPLAY_DIVISOR;
   return `₹ ${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ACCOUNTS_UNIT_SUFFIX}`;
 }
 

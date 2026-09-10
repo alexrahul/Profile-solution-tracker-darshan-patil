@@ -215,7 +215,8 @@ router.get("/accounts", async (req, res, next) => {
     );
     res.json({
       module: "accounts",
-      unitLabel: "₹ in Lakhs",
+      // Amounts are stored in Lakhs; the dashboard displays them in Crores.
+      unitLabel: "₹ in Crores",
       rows: result.rows.map(r => ({
         id: r.id,
         month: r.t_month,
