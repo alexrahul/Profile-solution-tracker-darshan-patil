@@ -6,6 +6,9 @@
   <title>Profile Solutions Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
+  <!-- Accounts (Receivables & Payables): trend chart + client-side .xlsx/.xls/.csv parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -116,18 +119,18 @@
 
     <section id="accountsPage" class="page">
       <div class="admin-banner">
-        <div><h2>Accounts</h2><p>Monthly Sales Orders, Purchase Orders and Invoices.</p></div>
-        <span id="accountsUnitLabel">₹ in Lakhs</span>
+        <div><h2>Accounts</h2><p>Receivables &amp; Payables aging, DSO and collection performance.</p></div>
+        <span>Live data</span>
       </div>
 
       <div id="accountsError" class="api-notice hidden"></div>
 
       <div id="accountsLoading" class="accounts-loading">
-        <div class="accounts-skeleton" style="height:88px"></div>
+        <div class="accounts-skeleton" style="height:60px"></div>
         <div class="accounts-skeleton-row">
-          <div class="accounts-skeleton" style="height:112px"></div>
-          <div class="accounts-skeleton" style="height:112px"></div>
-          <div class="accounts-skeleton" style="height:112px"></div>
+          <div class="accounts-skeleton" style="height:78px"></div>
+          <div class="accounts-skeleton" style="height:78px"></div>
+          <div class="accounts-skeleton" style="height:78px"></div>
         </div>
         <div class="accounts-skeleton" style="height:320px"></div>
       </div>
@@ -135,26 +138,47 @@
       <div id="accountsEmpty" class="accounts-empty hidden">
         <div class="placeholder-icon">₹</div>
         <h2>No accounts data yet</h2>
-        <p>Add monthly Sales Order, Purchase Order and Invoice figures in the Data section to see totals and trends here.</p>
+        <p>Add Receivables (or Payables) invoices in the Data section — bulk-upload a spreadsheet or add rows one at a time — to see aging, DSO and collection totals here.</p>
         <button id="accountsAddDataBtn" class="primary" type="button">Add data</button>
       </div>
 
       <div id="accountsDashboard" class="accounts-dashboard hidden">
         <div class="accounts-filters">
-          <label class="accounts-filter">From<select id="accountsFrom"></select></label>
-          <label class="accounts-filter">To<select id="accountsTo"></select></label>
-          <div class="accounts-range-toggle" id="accountsRangeToggle">
-            <button type="button" data-range="12">Last 12 months</button>
-            <button type="button" data-range="all">All time</button>
-          </div>
+          <label class="accounts-filter">FY
+            <select id="arApFySelect">
+              <option value="all">All data</option>
+              <option value="2024">FY 2024-25</option>
+              <option value="2025">FY 2025-26</option>
+              <option value="2026">FY 2026-27</option>
+              <option value="custom">Custom range</option>
+            </select>
+          </label>
+          <label class="accounts-filter">From<input type="date" id="arApFromDate"></label>
+          <label class="accounts-filter">To<input type="date" id="arApToDate"></label>
+          <label class="accounts-filter">As of date<input type="date" id="arApAsOfDate"></label>
         </div>
 
-        <div class="accounts-kpi-row" id="accountsKpiRow"></div>
+        <div class="accounts-kpi-row" id="arApKpiRow"></div>
 
-        <article class="card accounts-chart-card">
-          <div class="card-title"><span>▤</span><h3>Monthly Trend</h3></div>
-          <div class="accounts-legend" id="accountsLegend"></div>
-          <div class="accounts-chart-wrap" id="accountsChart"></div>
+        <h3 class="accounts-subheading">CEO VIEW</h3>
+        <div class="accounts-kpi-row" id="arApCeoKpiRow"></div>
+
+        <div class="ar-ap-grid2">
+          <article class="card ar-ap-aging-panel">
+            <h3 class="ar-ap-panel-title">RECEIVABLES</h3>
+            <p class="hint">Buckets are based on days between Due Date and the As-of-date, using outstanding Balance.</p>
+            <div class="table-scroll ar-ap-scrolltable"><table id="recvAgingTable"></table></div>
+          </article>
+          <article class="card ar-ap-aging-panel">
+            <h3 class="ar-ap-panel-title">PAYABLES</h3>
+            <p class="hint">No vendor bills uploaded yet — add rows in the Data section and this fills in automatically.</p>
+            <div class="table-scroll ar-ap-scrolltable"><table id="payAgingTable"></table></div>
+          </article>
+        </div>
+
+        <article class="card ar-ap-chart-card">
+          <h3 class="ar-ap-panel-title">Receivables vs Payables — Monthly Trend</h3>
+          <canvas id="arApTrendChart"></canvas>
         </article>
       </div>
     </section>
@@ -205,6 +229,34 @@
         </div>
         <div class="table-scroll"><table id="recordsTable"></table></div>
       </article>
+
+      <div id="arApPanel" class="ar-ap-panel hidden">
+        <article class="card bulk-card">
+          <div class="card-title"><span>⇧</span><h3>Bulk Upload <span class="badge" id="arApBulkTargetBadge">→ Receivables</span></h3></div>
+          <p class="hint">Uploads go into the data tab selected above. Template columns: <b>Date | Customer Name (or Vendor Name) | Due Date | Invoice Amount | Balance</b>. Dates as DD-MM-YYYY or Excel date cells; amounts may include ₹, spaces or Indian commas. Leave Balance blank if unknown — it stays blank (never zero). Repeated rows are kept.</p>
+          <div class="ar-ap-row">
+            <span>Download template</span>
+            <button class="outline" type="button" data-ar-tpl="xlsx">.xlsx</button>
+            <button class="outline" type="button" data-ar-tpl="csv">.csv</button>
+            <button class="outline" type="button" data-ar-tpl="xls">.xls</button>
+          </div>
+          <div class="ar-ap-row">
+            <span>Bulk upload</span>
+            <input type="file" id="arApBulkFile" accept=".xlsx,.xls,.csv">
+            <button class="primary" id="arApBulkAppend" type="button" disabled>Append to Existing Data</button>
+            <button class="outline ar-ap-danger" id="arApBulkReplace" type="button" disabled>Replace Existing Data</button>
+          </div>
+          <div id="arApBulkStatus"></div>
+          <div id="arApBulkErrors"></div>
+          <div id="arApBulkPreview"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-title"><span>▤</span><h3 id="arApDataTitle">Receivables — raw invoices</h3></div>
+          <div class="table-scroll ar-ap-edit-scroll"><table id="arApDataTable"></table></div>
+          <button class="outline full-width" id="arApAddRowBtn" type="button">+ Add invoice</button>
+        </article>
+      </div>
     </section>
 
     <section id="reportsPage" class="page">

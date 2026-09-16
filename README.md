@@ -1,5 +1,42 @@
 # Profile Solutions Dashboard v2.5.0
 
+## v2.9 changes
+
+- **Accounts is now a Receivables & Payables dashboard**, replacing the v2.7
+  monthly Sales-Order/Purchase-Order/Invoice KPI view:
+  - Filters: FY (Indian 1 Apr–31 Mar), custom From/To (on Invoice Date), and
+    an As-of date for aging.
+  - Two KPI rows: top-line totals (Receivables/Payables outstanding, Net
+    Position, Total Invoiced, Customers with Balance, Overdue > 60 Days) and
+    a "CEO View" row (Collection Efficiency, Total Collected, DSO, Overdue %,
+    Top Customer Concentration, Invoices/Avg Size).
+  - Side-by-side Receivables/Payables aging tables (0/30/45/60/120-day
+    buckets on outstanding Balance, plus Total Amount and Balance), sorted by
+    Total Amount ascending, with the Total Amount cell banded red/yellow/green
+    across each table's own min-max range.
+  - A Receivables vs Payables monthly trend line chart (Chart.js).
+- **Data section**: new "Receivables Data" / "Payables Data" tabs with a
+  bulk-editable grid (inline edit/add/remove, each persisted immediately) and
+  a dedicated bulk-upload panel - download an `.xlsx`/`.xls`/`.csv` template,
+  upload the same formats back (parsed and validated in the browser via
+  SheetJS: DD-MM-YYYY or Excel date cells, ₹/comma amounts, blank Balance
+  stays blank), with row-numbered errors and a preview, Append or Replace
+  (with confirmation).
+- New tables `receivables_data`, `payables_data`. The v2.7 `accounts_data`
+  table is no longer used by the app (left in place, not dropped).
+- New APIs: `GET /api/public/receivables`, `GET /api/public/payables`,
+  `POST /api/admin/:module/bulk-import` (module = `receivables`|`payables`).
+  Existing generic `/api/admin/:module` CRUD covers single-row add/edit/delete.
+- Re-adds Chart.js (removed in v2.4) for the trend chart, plus SheetJS for
+  in-browser spreadsheet parsing - both loaded from cdnjs.
+
+## Upgrade to v2.9
+
+Run `database/migrate_v2_9_receivables_payables.sql` in the Supabase SQL
+Editor. Optionally run `database/seed_receivables_sample.sql` **once** (not
+re-runnable - duplicate rows are intentionally allowed, matching real invoice
+data) to load 260 sample receivable invoices across 31 customers.
+
 ## v2.8.1 changes
 
 - **Fixed:** synced Google/Microsoft meeting times in Meeting Schedule (and

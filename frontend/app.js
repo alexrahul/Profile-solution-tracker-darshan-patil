@@ -25,12 +25,11 @@ const dataModules = {
     {name:"event_title",label:"Event Title",type:"text",required:true},
     {name:"description",label:"Event Description",type:"textarea"}
   ]},
-  accounts:{label:"Accounts Data", endpoint:"accounts", fields:[
-    {name:"t_month",label:"Month (YYYY-MM)",type:"month",required:true},
-    {name:"sales_order_amount",label:"Sales Order Amount (₹ Lakhs)",type:"number",required:true},
-    {name:"purchase_order_amount",label:"Purchase Order Amount (₹ Lakhs)",type:"number",required:true},
-    {name:"invoice_amount",label:"Invoice Amount (₹ Lakhs)",type:"number",required:true}
-  ]},
+  // Receivables/Payables use their own bulk-editable grid + upload UI (see
+  // the "Accounts (Receivables & Payables)" section below) instead of the
+  // generic single-row form, so these entries only exist to drive the tab bar.
+  receivables:{label:"Receivables Data", endpoint:"receivables", fields:[]},
+  payables:{label:"Payables Data", endpoint:"payables", fields:[]},
   meetings:{label:"Meeting Schedule Data", endpoint:"meetings", fields:[
     {name:"meeting_date",label:"Date",type:"date",required:true},
     {name:"meeting_time",label:"Time",type:"text",required:true},
@@ -86,7 +85,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupViewAllControls();
   setupDashboardVisibility();
   setupCalendarIntegration();
-  setupAccounts();
+  setupArAp();
   setupTvView();
 
   await restoreAuthSession();
@@ -233,7 +232,7 @@ async function setPage(page) {
 
   const titles = {
     dashboard:["Good Afternoon, Reema!","Here's your overview"],
-    accounts:["Accounts","Sales Orders, Purchase Orders & Invoices"],
+    accounts:["Accounts","Receivables & Payables"],
     projects:["Projects","Projects Module"],
     cctv:["CCTV","CCTV Module"],
     data:["Data","Manage all information that feeds the dashboard"],
@@ -247,11 +246,11 @@ async function setPage(page) {
     updateDateLabels();
     if (!hideDashboard && dashboardData !== null) refreshDashboard({ silent: true });
   } else if (page === "data") {
-    loadRecords();
+    syncDataPageMode();
   } else if (page === "settings") {
     loadCalendarConnections();
   } else if (page === "accounts") {
-    loadAccountsDashboard();
+    loadArApDashboard();
   } else if (["projects","cctv"].includes(page)) {
     loadPlaceholderModule(page);
   }
@@ -961,6 +960,10 @@ function updateDateLabels() {
   if (currentPage === "dashboard") $("pageSubheading").textContent = `Overview • ${label}`;
 }
 
+function isArApTab(tab) {
+  return tab === "receivables" || tab === "payables";
+}
+
 function setupDataTabs() {
   $("dataTabs").innerHTML = Object.entries(dataModules).map(([k, v]) =>
     `<button data-key="${k}" class="${k === currentDataTab ? "active" : ""}">${v.label}</button>`
@@ -970,16 +973,32 @@ function setupDataTabs() {
     currentDataTab = b.dataset.key;
     editingId = null;
     setupDataTabs();
-    renderDataForm();
-    updateBulkPanel();
-    loadRecords();
+    syncDataPageMode();
   });
 
-  renderDataForm();
-  updateBulkPanel();
   $("recordSearch").oninput = loadRecords;
   $("bulkUploadBtn").onclick = bulkUpload;
   $("downloadTemplateBtn").onclick = downloadTemplate;
+  updateArApTabCounts();
+}
+
+// Receivables/Payables get their own bulk-editable grid + upload panel
+// (#arApPanel) instead of the generic single-row form + records table, since
+// they're bulk invoice data rather than one-record-per-day admin entries.
+function syncDataPageMode() {
+  const isArAp = isArApTab(currentDataTab);
+  document.querySelector(".data-layout").classList.toggle("hidden", isArAp);
+  document.querySelector(".records-card").classList.toggle("hidden", isArAp);
+  $("arApPanel").classList.toggle("hidden", !isArAp);
+
+  if (isArAp) {
+    updateArApBulkTargetBadge();
+    loadArApRecords();
+  } else {
+    renderDataForm();
+    updateBulkPanel();
+    loadRecords();
+  }
 }
 
 function renderDataForm(record = {}) {
@@ -1181,291 +1200,616 @@ function esc(v) {
 }
 function escAttr(v) { return esc(v); }
 
+
 /* ------------------------------------------------------------------ *
- * Accounts module - KPI dashboard (totals + monthly trend)
- * All figures are computed live from /api/public/accounts, which returns
- * one row per month. Aggregation and range filtering happen here.
+ * Accounts module - Receivables & Payables aging dashboard
+ * Accounts page (#accountsPage): read-only, fetches /api/public/receivables
+ * and /api/public/payables, computes aging/KPIs/DSO/trend client-side.
+ * Data page (#dataPage, tabs "receivables"/"payables"): bulk-editable grid +
+ * spreadsheet bulk-upload, backed by /api/admin/receivables|payables.
  * ------------------------------------------------------------------ */
 
-// Amounts are entered/stored in Lakhs (full precision). The dashboard displays
-// them in Crores: 1 Cr = 100 L, so divide by ACCOUNTS_DISPLAY_DIVISOR for display.
-const ACCOUNTS_UNIT_LABEL = "₹ in Crores";
-const ACCOUNTS_UNIT_SUFFIX = "Cr";
-const ACCOUNTS_DISPLAY_DIVISOR = 100;
-const ACCOUNTS_SERIES = [
-  { key: "salesOrder", label: "Sales Orders", color: "#3B82F6" },
-  { key: "purchaseOrder", label: "Purchase Orders", color: "#F59E0B" },
-  { key: "invoice", label: "Invoices", color: "#22C55E" }
-];
-
-let accountsRows = [];
-let accountsUnitLabel = ACCOUNTS_UNIT_LABEL;
-let accountsRangeMode = "12";
-let accountsHiddenSeries = new Set();
-
-function setupAccounts() {
-  const addBtn = $("accountsAddDataBtn");
-  if (addBtn) addBtn.onclick = openAccountsDataEntry;
-
-  const toggle = $("accountsRangeToggle");
-  if (toggle) {
-    toggle.querySelectorAll("[data-range]").forEach(btn => {
-      btn.onclick = () => applyAccountsRangeMode(btn.dataset.range);
-    });
-  }
+function fmtCr(n) {
+  return "₹ " + (Number(n) / 1e7).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Cr";
+}
+function arApDaysBetween(a, b) {
+  return Math.round((new Date(b) - new Date(a)) / 86400000);
 }
 
-function setAccountsView(view) {
+const AR_AP_BUCKETS = [
+  { label: "0", hi: 30 },
+  { label: "30", hi: 45 },
+  { label: "45", hi: 60 },
+  { label: "60", hi: 120 },
+  { label: "120", hi: null }
+];
+function arApBucketFor(days) {
+  if (days <= 30) return 0;
+  if (days <= 45) return 1;
+  if (days <= 60) return 2;
+  if (days <= 120) return 3;
+  return 4;
+}
+// byCust buckets/invoiced sums rely on JS's `null` coercing to 0 in `+=` so a
+// row with a missing (null) Balance simply contributes nothing to aging.
+function arApComputeAging(rows, asOf) {
+  const byCust = {};
+  rows.forEach(r => {
+    const days = arApDaysBetween(r.due, asOf);
+    const bi = arApBucketFor(days);
+    if (!byCust[r.customer]) byCust[r.customer] = { buckets: [0, 0, 0, 0, 0], invoiced: 0 };
+    byCust[r.customer].buckets[bi] += r.balance;
+    byCust[r.customer].invoiced += r.amount;
+  });
+  const list = Object.entries(byCust).map(([customer, o]) => {
+    const total = o.buckets.reduce((s, v) => s + v, 0);
+    return { customer, buckets: o.buckets, total, invoiced: o.invoiced };
+  });
+  list.sort((a, b) => a.total - b.total);
+  return list;
+}
+
+const AR_AP_BAND_COLORS = ["#e05a5a", "#e8c547", "#4fc98a"]; // low=red, medium=yellow, high=green
+function arApTotalBand(v, lo, hi) {
+  if (hi === lo) return 0;
+  const t = (v - lo) / (hi - lo);
+  return t < 1 / 3 ? 0 : (t < 2 / 3 ? 1 : 2);
+}
+
+function arApRenderAgingTable(elId, rows, asOf, labelCol) {
+  const el = $(elId);
+  el.innerHTML = "";
+  const agg = arApComputeAging(rows, asOf).slice().sort((a, b) => a.invoiced - b.invoiced);
+
+  const thead = document.createElement("tr");
+  thead.innerHTML = `<th>${esc(labelCol)}</th>` + AR_AP_BUCKETS.map(b => `<th class="num">${esc(b.label)}</th>`).join("") +
+    `<th class="num">Total Amount</th><th class="num">Balance</th>`;
+  el.appendChild(thead);
+
+  if (!agg.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="8" class="ar-ap-empty-row">No data yet</td>`;
+    el.appendChild(tr);
+  }
+
+  const totVals = agg.map(r => r.invoiced);
+  const bandLo = totVals.length ? Math.min(...totVals) : 0;
+  const bandHi = totVals.length ? Math.max(...totVals) : 0;
+
+  agg.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(r.customer)}</td>` +
+      r.buckets.map(v => `<td class="num">${esc(fmtCr(v))}</td>`).join("") +
+      `<td class="num ar-ap-band" style="background:${AR_AP_BAND_COLORS[arApTotalBand(r.invoiced, bandLo, bandHi)]}">${esc(fmtCr(r.invoiced))}</td>` +
+      `<td class="num">${esc(fmtCr(r.total))}</td>`;
+    el.appendChild(tr);
+  });
+
+  const totals = [0, 0, 0, 0, 0];
+  let grandInvoiced = 0;
+  agg.forEach(r => { r.buckets.forEach((v, i) => { totals[i] += v; }); grandInvoiced += r.invoiced; });
+  const grand = totals.reduce((s, v) => s + v, 0);
+  const totRow = document.createElement("tr");
+  totRow.className = "totalrow";
+  totRow.innerHTML = `<td>Total</td>` + totals.map(v => `<td class="num">${esc(fmtCr(v))}</td>`).join("") +
+    `<td class="num">${esc(fmtCr(grandInvoiced))}</td>` + `<td class="num">${esc(fmtCr(grand))}</td>`;
+  el.appendChild(totRow);
+  return grand;
+}
+
+function arApRenderKpis(recv, pay, recvTotal, payTotal, asOf) {
+  const totalInvoiced = recv.reduce((s, r) => s + r.amount, 0);
+  const custCount = new Set(recv.filter(r => (r.balance || 0) > 0).map(r => r.customer)).size;
+  const overdue60 = recv.filter(r => arApDaysBetween(r.due, asOf) > 60).reduce((s, r) => s + (r.balance || 0), 0);
+  const cards = [
+    ["Total Receivables Outstanding", fmtCr(recvTotal)],
+    ["Total Payables Outstanding", fmtCr(payTotal)],
+    ["Net Position (Recv − Pay)", fmtCr(recvTotal - payTotal)],
+    ["Total Invoiced (Receivables)", fmtCr(totalInvoiced)],
+    ["Customers with Balance", String(custCount)],
+    ["Overdue > 60 Days", fmtCr(overdue60)]
+  ];
+  $("arApKpiRow").innerHTML = cards.map(([label, val]) => `
+    <article class="card accounts-kpi-card">
+      <h3 class="accounts-kpi-title">${esc(label)}</h3>
+      <div class="accounts-kpi-value">${esc(val)}</div>
+    </article>`).join("");
+
+  const collected = totalInvoiced - recvTotal;
+  const collectionEff = totalInvoiced > 0 ? (collected / totalInvoiced * 100) : 0;
+  const overdueAny = recv.filter(r => arApDaysBetween(r.due, asOf) > 0 && (r.balance || 0) > 0).reduce((s, r) => s + (r.balance || 0), 0);
+  const overduePct = recvTotal > 0 ? (overdueAny / recvTotal * 100) : 0;
+  let periodDays = 365;
+  const fromV = $("arApFromDate").value, toV = $("arApToDate").value;
+  if (fromV && toV) periodDays = Math.max(1, arApDaysBetween(fromV, toV) + 1);
+  const dso = totalInvoiced > 0 ? (recvTotal / totalInvoiced * periodDays) : 0;
+  const agg = arApComputeAging(recv, asOf);
+  const topCust = agg.length ? agg.reduce((a, b) => (b.total > a.total ? b : a)) : null;
+  const concentration = (recvTotal > 0 && topCust) ? (topCust.total / recvTotal * 100) : 0;
+  const invoiceCount = recv.length;
+  const avgInvoice = invoiceCount > 0 ? totalInvoiced / invoiceCount : 0;
+
+  const ceo = [
+    ["Collection Efficiency", collectionEff.toFixed(1) + "%", collectionEff >= 70 ? "up" : "down"],
+    ["Total Collected", esc(fmtCr(collected)), ""],
+    ["DSO (Days Sales Outstanding)", Math.round(dso) + " days", dso <= 60 ? "up" : "down"],
+    ["Overdue % of Outstanding", overduePct.toFixed(1) + "%", overduePct <= 30 ? "up" : "down"],
+    ["Top Customer Concentration", concentration.toFixed(1) + "%" + (topCust ? `<div class="accounts-kpi-sub">${esc(topCust.customer)}</div>` : ""), concentration <= 25 ? "up" : "down"],
+    ["Invoices / Avg Size", `${invoiceCount} / ${esc(fmtCr(avgInvoice))}`, ""]
+  ];
+  const toneColor = tone => (tone === "up" ? "var(--green)" : tone === "down" ? "var(--red)" : "var(--blue)");
+  $("arApCeoKpiRow").innerHTML = ceo.map(([label, val, tone]) => `
+    <article class="card accounts-kpi-card" style="border-left:3px solid ${toneColor(tone)}">
+      <h3 class="accounts-kpi-title">${esc(label)}</h3>
+      <div class="accounts-kpi-value">${val}</div>
+    </article>`).join("");
+}
+
+let arApTrendChart;
+function arApRenderTrend(recv, pay) {
+  const monthKey = d => d.slice(0, 7);
+  const recvByMonth = {}, payByMonth = {};
+  recv.forEach(r => { const k = monthKey(r.date); recvByMonth[k] = (recvByMonth[k] || 0) + r.amount; });
+  pay.forEach(r => { const k = monthKey(r.date); payByMonth[k] = (payByMonth[k] || 0) + r.amount; });
+  const months = Array.from(new Set([...Object.keys(recvByMonth), ...Object.keys(payByMonth)])).sort();
+  const finalMonths = months.length ? months : [localToday().slice(0, 7)];
+  const recvData = finalMonths.map(m => recvByMonth[m] || 0);
+  const payData = finalMonths.map(m => payByMonth[m] || 0);
+
+  if (typeof Chart === "undefined") {
+    console.warn("Chart.js did not load; Receivables/Payables trend chart skipped.");
+    return;
+  }
+  if (arApTrendChart) arApTrendChart.destroy();
+  arApTrendChart = new Chart($("arApTrendChart"), {
+    type: "line",
+    data: {
+      labels: finalMonths,
+      datasets: [
+        { label: "Receivables", data: recvData, borderColor: "#3B82F6", backgroundColor: "rgba(59,130,246,.12)", borderWidth: 2, tension: .25, pointRadius: 2 },
+        { label: "Payables", data: payData, borderColor: "#EF4444", backgroundColor: "rgba(239,68,68,.12)", borderWidth: 2, borderDash: [5, 3], tension: .25, pointRadius: 2 }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: "#9CA3AF" } } },
+      scales: {
+        x: { ticks: { color: "#9CA3AF", maxRotation: 60, minRotation: 60 }, grid: { display: false } },
+        y: { ticks: { color: "#9CA3AF", callback: v => "₹" + (v / 1e7).toFixed(1) + "Cr" }, grid: { color: "#1F2937" } }
+      }
+    }
+  });
+}
+
+/* ---------------- Accounts page: fetch + filter + render ---------------- */
+
+let arApDashboard = { receivables: [], payables: [] };
+
+function setArApView(view) {
   $("accountsLoading").classList.toggle("hidden", view !== "loading");
   $("accountsEmpty").classList.toggle("hidden", view !== "empty");
   $("accountsDashboard").classList.toggle("hidden", view !== "dashboard");
 }
 
-async function loadAccountsDashboard() {
-  setAccountsView("loading");
+async function loadArApDashboard() {
+  setArApView("loading");
   $("accountsError").classList.add("hidden");
-
   try {
-    const result = await api("/api/public/accounts");
-    accountsRows = (result.rows || [])
-      .map(r => ({
-        month: r.month,
-        salesOrder: Number(r.salesOrder) || 0,
-        purchaseOrder: Number(r.purchaseOrder) || 0,
-        invoice: Number(r.invoice) || 0
-      }))
-      .filter(r => /^\d{4}-\d{2}$/.test(r.month || ""))
-      .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
+    const [recvResult, payResult] = await Promise.all([
+      api("/api/public/receivables"),
+      api("/api/public/payables")
+    ]);
+    arApDashboard.receivables = recvResult.rows || [];
+    arApDashboard.payables = payResult.rows || [];
 
-    accountsUnitLabel = result.unitLabel || ACCOUNTS_UNIT_LABEL;
-    $("accountsUnitLabel").textContent = accountsUnitLabel;
-
-    if (!accountsRows.length) {
-      setAccountsView("empty");
+    if (!arApDashboard.receivables.length && !arApDashboard.payables.length) {
+      setArApView("empty");
       return;
     }
-
-    setAccountsView("dashboard");
-    initAccountsFilters();
+    setArApView("dashboard");
+    initArApFilters();
   } catch (err) {
-    accountsRows = [];
-    setAccountsView("empty");
+    arApDashboard = { receivables: [], payables: [] };
+    setArApView("empty");
     const notice = $("accountsError");
     notice.classList.remove("hidden");
     notice.textContent = "Accounts data could not be loaded. " + err.message;
   }
 }
 
-function initAccountsFilters() {
-  const months = accountsRows.map(r => r.month);
-  const options = months.map(m => `<option value="${escAttr(m)}">${esc(formatAccountsMonth(m))}</option>`).join("");
-  $("accountsFrom").innerHTML = options;
-  $("accountsTo").innerHTML = options;
+function initArApFilters() {
+  const fy = $("arApFySelect"), from = $("arApFromDate"), to = $("arApToDate"), asOf = $("arApAsOfDate");
+  if (!asOf.value) asOf.value = localToday();
 
-  $("accountsFrom").onchange = () => {
-    if ($("accountsFrom").value > $("accountsTo").value) $("accountsTo").value = $("accountsFrom").value;
-    accountsRangeMode = "custom";
-    syncAccountsRangeButtons();
-    renderAccounts();
-  };
-  $("accountsTo").onchange = () => {
-    if ($("accountsTo").value < $("accountsFrom").value) $("accountsFrom").value = $("accountsTo").value;
-    accountsRangeMode = "custom";
-    syncAccountsRangeButtons();
-    renderAccounts();
-  };
-
-  applyAccountsRangeMode("12");
-}
-
-function applyAccountsRangeMode(mode) {
-  const months = accountsRows.map(r => r.month);
-  if (!months.length) return;
-  accountsRangeMode = mode;
-
-  if (mode === "all") {
-    $("accountsFrom").value = months[0];
-    $("accountsTo").value = months[months.length - 1];
-  } else {
-    accountsRangeMode = "12";
-    const start = Math.max(0, months.length - 12);
-    $("accountsFrom").value = months[start];
-    $("accountsTo").value = months[months.length - 1];
-  }
-
-  syncAccountsRangeButtons();
-  renderAccounts();
-}
-
-function syncAccountsRangeButtons() {
-  $("accountsRangeToggle").querySelectorAll("[data-range]").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.range === accountsRangeMode);
-  });
-}
-
-function getAccountsFiltered() {
-  const from = $("accountsFrom").value;
-  const to = $("accountsTo").value;
-  if (!from || !to) return accountsRows.slice();
-  return accountsRows.filter(r => r.month >= from && r.month <= to);
-}
-
-function renderAccounts() {
-  const rows = getAccountsFiltered();
-  renderAccountsKpis(rows);
-  renderAccountsLegend();
-  renderAccountsChart(rows);
-}
-
-function renderAccountsKpis(rows) {
-  const totals = { salesOrder: 0, purchaseOrder: 0, invoice: 0 };
-  rows.forEach(r => ACCOUNTS_SERIES.forEach(s => { totals[s.key] += r[s.key] || 0; }));
-
-  const latest = rows[rows.length - 1];
-  const prev = rows[rows.length - 2];
-
-  $("accountsKpiRow").innerHTML = ACCOUNTS_SERIES.map(s => {
-    let sub;
-    if (!latest) {
-      sub = `<span class="accounts-kpi-sub muted">No data in selected range</span>`;
-    } else {
-      const current = latest[s.key] || 0;
-      let deltaHtml = "";
-      if (prev) {
-        const change = accountsPctChange(current, prev[s.key] || 0);
-        deltaHtml = ` <span class="accounts-delta ${change.dir}">${esc(change.text)}</span>`;
-      }
-      sub = `<span class="accounts-kpi-sub">${esc(formatAccountsMonth(latest.month))}: ${esc(formatAccountsAmount(current))}${deltaHtml}</span>`;
+  fy.onchange = () => {
+    const v = fy.value;
+    if (v === "all") { from.value = ""; to.value = ""; }
+    else if (v !== "custom") {
+      const y = parseInt(v, 10);
+      from.value = `${y}-04-01`;
+      to.value = `${y + 1}-03-31`;
     }
-    return `<article class="card accounts-kpi-card">
-        <span class="accounts-kpi-dot" style="background:${s.color}"></span>
-        <h3 class="accounts-kpi-title">Total ${esc(s.label)}</h3>
-        <div class="accounts-kpi-value">${esc(formatAccountsAmount(totals[s.key]))}</div>
-        ${sub}
-      </article>`;
-  }).join("");
+    renderArApAccounts();
+  };
+  from.oninput = () => { fy.value = "custom"; renderArApAccounts(); };
+  to.oninput = () => { fy.value = "custom"; renderArApAccounts(); };
+  asOf.oninput = renderArApAccounts;
+
+  renderArApAccounts();
 }
 
-// % change vs the previous month in range. Guards previous === 0 so a month
-// that follows a zero month shows "New" instead of dividing by zero.
-function accountsPctChange(current, previous) {
-  if (previous === 0 && current === 0) return { text: "0.0% vs prev", dir: "flat" };
-  if (previous === 0) return { text: "New vs prev", dir: "up" };
-  const pct = ((current - previous) / previous) * 100;
-  const dir = pct > 0.05 ? "up" : pct < -0.05 ? "down" : "flat";
-  const arrow = dir === "up" ? "▲" : dir === "down" ? "▼" : "▬";
-  return { text: `${arrow} ${Math.abs(pct).toFixed(1)}% vs prev`, dir };
+function arApInRange(r) {
+  const f = $("arApFromDate").value, t = $("arApToDate").value;
+  if (f && r.date < f) return false;
+  if (t && r.date > t) return false;
+  return true;
 }
 
-function renderAccountsLegend() {
-  const legend = $("accountsLegend");
-  legend.innerHTML = ACCOUNTS_SERIES.map(s => {
-    const off = accountsHiddenSeries.has(s.key);
-    return `<button type="button" class="accounts-legend-item${off ? " off" : ""}" data-series="${s.key}">
-        <span class="accounts-legend-swatch" style="background:${s.color}"></span>${esc(s.label)}
-      </button>`;
-  }).join("");
+function renderArApAccounts() {
+  const asOf = $("arApAsOfDate").value || localToday();
+  const recv = arApDashboard.receivables.filter(arApInRange);
+  const pay = arApDashboard.payables.filter(arApInRange);
 
-  legend.querySelectorAll("[data-series]").forEach(btn => {
-    btn.onclick = () => {
-      const key = btn.dataset.series;
-      if (accountsHiddenSeries.has(key)) accountsHiddenSeries.delete(key);
-      else accountsHiddenSeries.add(key);
-      renderAccountsLegend();
-      renderAccountsChart(getAccountsFiltered());
-    };
+  const recvTotal = arApRenderAgingTable("recvAgingTable", recv, asOf, "Customer");
+  const payTotal = arApRenderAgingTable("payAgingTable", pay, asOf, "Vendor");
+  arApRenderKpis(recv, pay, recvTotal, payTotal, asOf);
+  arApRenderTrend(recv, pay);
+}
+
+/* ---------------- Data page: editable grid ---------------- */
+
+let arApEditRows = [];
+
+function updateArApBulkTargetBadge() {
+  const which = currentDataTab === "payables" ? "Payables" : "Receivables";
+  $("arApBulkTargetBadge").textContent = "→ " + which;
+  $("arApDataTitle").textContent = currentDataTab === "payables" ? "Payables — raw vendor bills" : "Receivables — raw invoices";
+}
+
+async function updateArApTabCounts() {
+  if (!token) return;
+  try {
+    const [recv, pay] = await Promise.all([api("/api/admin/receivables"), api("/api/admin/payables")]);
+    const rBtn = document.querySelector('#dataTabs button[data-key="receivables"]');
+    const pBtn = document.querySelector('#dataTabs button[data-key="payables"]');
+    if (rBtn) rBtn.textContent = `Receivables Data (${recv.length})`;
+    if (pBtn) pBtn.textContent = `Payables Data (${pay.length})`;
+  } catch {
+    // best-effort; tab labels just keep their previous text
+  }
+}
+
+async function loadArApRecords() {
+  if (!token) return;
+  updateArApBulkTargetBadge();
+  const endpoint = dataModules[currentDataTab].endpoint;
+  const isPayables = currentDataTab === "payables";
+  try {
+    const rows = await api(`/api/admin/${endpoint}`);
+    arApEditRows = rows.map(r => ({
+      id: r.id,
+      customer: isPayables ? r.vendor_name : r.customer_name,
+      date: normalizeDateValue(r.invoice_date),
+      due: normalizeDateValue(r.due_date),
+      amount: r.invoice_amount === null || r.invoice_amount === undefined ? null : Number(r.invoice_amount),
+      balance: r.balance === null || r.balance === undefined ? null : Number(r.balance)
+    }));
+    arApRenderDataTable();
+  } catch (err) {
+    $("arApDataTable").innerHTML = `<tbody><tr><td>${esc(err.message)}</td></tr></tbody>`;
+  }
+  updateArApTabCounts();
+}
+
+function arApRenderDataTable() {
+  const el = $("arApDataTable");
+  el.innerHTML = "";
+  const nameLabel = currentDataTab === "payables" ? "Vendor" : "Customer";
+
+  const thead = document.createElement("tr");
+  thead.innerHTML = `<th>${esc(nameLabel)}</th><th>Invoice Date</th><th>Due Date</th><th class="num">Amount</th><th class="num">Balance</th><th></th>`;
+  el.appendChild(thead);
+
+  arApEditRows.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input value="${escAttr(r.customer)}" data-f="customer"></td>
+      <td><input type="date" value="${escAttr(r.date || "")}" data-f="date"></td>
+      <td><input type="date" value="${escAttr(r.due || "")}" data-f="due"></td>
+      <td><input type="number" step="0.01" value="${r.amount === null || r.amount === undefined ? "" : r.amount}" data-f="amount" style="text-align:right"></td>
+      <td><input type="number" step="0.01" value="${r.balance === null || r.balance === undefined ? "" : r.balance}" data-f="balance" style="text-align:right"></td>
+      <td><button type="button" class="table-action delete">Remove</button></td>`;
+    tr.querySelectorAll("input").forEach(inp => { inp.onblur = () => arApSaveRow(i, inp.dataset.f, inp.value); });
+    tr.querySelector(".table-action.delete").onclick = () => arApRemoveRow(i);
+    el.appendChild(tr);
   });
 }
 
-// Lightweight hand-rolled SVG line chart (no chart library dependency, matching
-// the rest of the app). Responsive through the viewBox.
-function renderAccountsChart(rows) {
-  const wrap = $("accountsChart");
-  const visible = ACCOUNTS_SERIES.filter(s => !accountsHiddenSeries.has(s.key));
+async function arApSaveRow(index, field, rawValue) {
+  const row = arApEditRows[index];
+  if (!row) return;
+  const value = (field === "amount" || field === "balance")
+    ? (String(rawValue).trim() === "" ? null : (isNaN(parseFloat(rawValue)) ? null : parseFloat(rawValue)))
+    : rawValue;
+  if (row[field] === value) return; // unchanged on this blur - skip the write
+  row[field] = value;
 
-  if (!rows.length) {
-    wrap.innerHTML = `<div class="accounts-empty-inline">No data in the selected range.</div>`;
+  const endpoint = dataModules[currentDataTab].endpoint;
+  const nameField = currentDataTab === "payables" ? "vendor_name" : "customer_name";
+  const body = { [nameField]: row.customer, invoice_date: row.date, due_date: row.due, invoice_amount: row.amount, balance: row.balance };
+  try {
+    await api(`/api/admin/${endpoint}/${row.id}`, { method: "PUT", body: JSON.stringify(body) });
+  } catch (err) {
+    $("formMessage").className = "form-error";
+    $("formMessage").textContent = err.message;
+  }
+}
+
+async function arApAddRow() {
+  const endpoint = dataModules[currentDataTab].endpoint;
+  const isPayables = currentDataTab === "payables";
+  const nameField = isPayables ? "vendor_name" : "customer_name";
+  const today = localToday();
+  const dueDate = dateFromYmd(today);
+  dueDate.setDate(dueDate.getDate() + 30);
+  const due = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`;
+  const body = { [nameField]: isPayables ? "New Vendor" : "New Customer", invoice_date: today, due_date: due, invoice_amount: 0, balance: 0 };
+
+  try {
+    await api(`/api/admin/${endpoint}`, { method: "POST", body: JSON.stringify(body) });
+    await loadArApRecords();
+    $("formMessage").className = "form-success";
+    $("formMessage").textContent = "Row added — edit the name, dates and amount below.";
+  } catch (err) {
+    $("formMessage").className = "form-error";
+    $("formMessage").textContent = err.message;
+  }
+}
+
+async function arApRemoveRow(index) {
+  const row = arApEditRows[index];
+  if (!row) return;
+  const endpoint = dataModules[currentDataTab].endpoint;
+  try {
+    await api(`/api/admin/${endpoint}/${row.id}`, { method: "DELETE" });
+    await loadArApRecords();
+  } catch (err) {
+    $("formMessage").className = "form-error";
+    $("formMessage").textContent = err.message;
+  }
+}
+
+/* ---------------- Data page: bulk upload (.xlsx/.xls/.csv) ---------------- */
+
+function arApTemplateCols() {
+  return ["Date", currentDataTab === "payables" ? "Vendor Name" : "Customer Name", "Due Date", "Invoice Amount", "Balance"];
+}
+
+function arApDownloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function arApDownloadTemplate(fmt) {
+  const cols = arApTemplateCols();
+  const which = currentDataTab === "payables" ? "payables" : "receivables";
+  const base = which + "-template";
+  if (fmt === "csv") {
+    const csv = "﻿" + cols.join(",") + "\r\n"; // BOM so Excel opens it as UTF-8
+    arApDownloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), base + ".csv");
     return;
   }
-
-  const W = 920, H = 360, padL = 64, padR = 20, padT = 18, padB = 48;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const n = rows.length;
-
-  // Chart geometry and axis labels are in display units (Crores).
-  const div = ACCOUNTS_DISPLAY_DIVISOR;
-  let maxV = 0;
-  rows.forEach(r => visible.forEach(s => { maxV = Math.max(maxV, (r[s.key] || 0) / div); }));
-  const niceMax = accountsNiceMax(maxV || 1);
-
-  const xAt = i => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
-  const yAt = v => padT + plotH - (v / niceMax) * plotH;
-
-  const steps = 5;
-  let grid = "";
-  for (let i = 0; i <= steps; i++) {
-    const gv = (niceMax / steps) * i;
-    const gy = yAt(gv).toFixed(1);
-    grid += `<line x1="${padL}" y1="${gy}" x2="${W - padR}" y2="${gy}" class="accounts-grid-line" />`;
-    grid += `<text x="${padL - 10}" y="${(Number(gy) + 4).toFixed(1)}" class="accounts-axis-label" text-anchor="end">${esc(accountsShortNum(gv))}</text>`;
+  if (typeof XLSX === "undefined") {
+    $("formMessage").className = "form-error";
+    $("formMessage").textContent = "Spreadsheet library not loaded — cannot build .xlsx/.xls template (check internet access). CSV still works.";
+    return;
   }
+  const ws = XLSX.utils.aoa_to_sheet([cols]);
+  ws["!cols"] = [{ wch: 14 }, { wch: 40 }, { wch: 14 }, { wch: 16 }, { wch: 16 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, which === "payables" ? "Payables" : "Receivables");
+  XLSX.writeFile(wb, `${base}.${fmt}`, { bookType: fmt }); // genuine XLSX (zip) or BIFF8 XLS, not a renamed file
+}
 
-  const stepX = Math.max(1, Math.ceil(n / 8));
-  let xLabels = "";
-  rows.forEach((r, i) => {
-    if (i % stepX === 0 || i === n - 1) {
-      xLabels += `<text x="${xAt(i).toFixed(1)}" y="${H - padB + 20}" class="accounts-axis-label" text-anchor="middle">${esc(formatAccountsMonth(r.month))}</text>`;
+const arApPad2 = n => String(n).padStart(2, "0");
+function arApIsoFromYMD(y, m, d) {
+  if (!(y >= 1900 && y <= 2200 && m >= 1 && m <= 12 && d >= 1 && d <= 31)) return null;
+  const t = Date.UTC(y, m - 1, d);
+  const dt = new Date(t);
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${arApPad2(m)}-${arApPad2(d)}`;
+}
+function arApParseDateCell(v) {
+  if (v === null || v === undefined || v === "") return { iso: null, missing: true };
+  if (v instanceof Date) {
+    if (isNaN(v)) return { iso: null };
+    return { iso: arApIsoFromYMD(v.getFullYear(), v.getMonth() + 1, v.getDate()) }; // native Excel date cell
+  }
+  if (typeof v === "number") {
+    if (v > 0 && v < 2958466 && typeof XLSX !== "undefined") {
+      const p = XLSX.SSF.parse_date_code(v);
+      return { iso: p ? arApIsoFromYMD(p.y, p.m, p.d) : null };
     }
-  });
+    return { iso: null };
+  }
+  const str = String(v).trim();
+  let m;
+  if ((m = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) return { iso: arApIsoFromYMD(+m[3], +m[2], +m[1]) }; // DD-MM-YYYY
+  if ((m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/))) return { iso: arApIsoFromYMD(+m[1], +m[2], +m[3]) }; // ISO
+  return { iso: null };
+}
+function arApParseAmountCell(v) {
+  if (v === null || v === undefined) return { val: null, missing: true };
+  if (typeof v === "number") return isFinite(v) ? { val: v } : { val: null };
+  let str = String(v).replace(/[₹\s,]/g, "").replace(/^(Rs\.?|INR)/i, "");
+  if (str === "") return { val: null, missing: true };
+  if (!/^-?\d+(\.\d+)?$/.test(str)) return { val: null };
+  return { val: parseFloat(str) };
+}
+const arApNormHdr = h => String(h === null || h === undefined ? "" : h).toLowerCase().replace(/[^a-z]/g, "");
+function arApMapHeaders(headerRow) {
+  const H = headerRow.map(arApNormHdr);
+  const find = (...keys) => { for (const k of keys) { const i = H.indexOf(k); if (i >= 0) return i; } return -1; };
+  const idx = { date: find("date", "invoicedate"), name: find("customername", "vendorname", "customer", "vendor", "name"), due: find("duedate", "due"), amount: find("invoiceamount", "amount"), balance: find("balance", "outstandingbalance", "outstanding") };
+  const missing = Object.entries(idx).filter(([, i]) => i < 0).map(([k]) => ({ date: "Date", name: "Customer Name / Vendor Name", due: "Due Date", amount: "Invoice Amount", balance: "Balance" }[k]));
+  return { idx, missing };
+}
+function arApParseSheetRows(aoa) {
+  const errors = [], rows = [];
+  let h = 0;
+  while (h < aoa.length && !(aoa[h] || []).some(c => c !== null && c !== undefined && String(c).trim() !== "")) h++;
+  if (h >= aoa.length) return { rows, errors: ["File is empty."] };
+  const { idx, missing } = arApMapHeaders(aoa[h]);
+  if (missing.length) return { rows, errors: ["Missing required column(s): " + missing.join(", ") + ". Expected: " + arApTemplateCols().join(" | ")] };
 
-  let series = "";
-  visible.forEach(s => {
-    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt((r[s.key] || 0) / div).toFixed(1)}`).join(" ");
-    series += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" />`;
-    series += rows.map((r, i) =>
-      `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt((r[s.key] || 0) / div).toFixed(1)}" r="2.6" fill="${s.color}"><title>${esc(formatAccountsMonth(r.month))} — ${esc(s.label)}: ${esc(formatAccountsAmount(r[s.key] || 0))}</title></circle>`
-    ).join("");
-  });
-
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="accounts-chart-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Monthly trend of sales orders, purchase orders and invoices">
-      ${grid}
-      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" class="accounts-axis-line" />
-      <line x1="${padL}" y1="${padT + plotH}" x2="${W - padR}" y2="${padT + plotH}" class="accounts-axis-line" />
-      ${series}
-      ${xLabels}
-    </svg>`;
+  for (let i = h + 1; i < aoa.length; i++) {
+    const r = aoa[i] || [];
+    const excelRow = i + 1;
+    if (!r.some(c => c !== null && c !== undefined && String(c).trim() !== "")) continue; // skip blank rows
+    const errs = [];
+    const name = String(r[idx.name] === null || r[idx.name] === undefined ? "" : r[idx.name]).replace(/\s+/g, " ").trim();
+    if (!name) errs.push((currentDataTab === "payables" ? "Vendor" : "Customer") + " Name is missing");
+    const d = arApParseDateCell(r[idx.date]); if (d.missing) errs.push("Date is missing"); else if (!d.iso) errs.push("Date is invalid (use DD-MM-YYYY)");
+    const du = arApParseDateCell(r[idx.due]); if (du.missing) errs.push("Due Date is missing"); else if (!du.iso) errs.push("Due Date is invalid (use DD-MM-YYYY)");
+    const am = arApParseAmountCell(r[idx.amount]); if (am.missing) errs.push("Invoice Amount is missing"); else if (am.val === null) errs.push("Invoice Amount is not a number");
+    const bl = arApParseAmountCell(r[idx.balance]); if (!bl.missing && bl.val === null) errs.push("Balance is not a number");
+    if (errs.length) errors.push(`Row ${excelRow}: ${errs.join("; ")}`);
+    rows.push({ customer: name, date: d.iso, due: du.iso, amount: am.val, balance: bl.missing ? null : bl.val, _row: excelRow, _bad: errs.length > 0 });
+  }
+  if (!rows.length) errors.push("No data rows found below the header.");
+  return { rows, errors };
 }
 
-function accountsNiceMax(v) {
-  if (v <= 0) return 1;
-  const pow = Math.pow(10, Math.floor(Math.log10(v)));
-  const base = v / pow;
-  const nice = base <= 1 ? 1 : base <= 2 ? 2 : base <= 2.5 ? 2.5 : base <= 5 ? 5 : 10;
-  return nice * pow;
+let arApBulkParsed = null; // {rows:[...], which}
+
+function arApSetBulkStatus(msg, cls) {
+  const el = $("arApBulkStatus");
+  el.innerHTML = "";
+  if (!msg) return;
+  const d = document.createElement("div");
+  d.className = cls === "err" ? "form-error" : "form-success";
+  d.textContent = msg;
+  el.appendChild(d);
+}
+function arApResetBulk() {
+  arApBulkParsed = null;
+  arApSetBulkStatus("");
+  $("arApBulkErrors").innerHTML = "";
+  $("arApBulkPreview").innerHTML = "";
+  $("arApBulkAppend").disabled = true;
+  $("arApBulkReplace").disabled = true;
+  $("arApBulkFile").value = "";
 }
 
-function accountsShortNum(v) {
-  const abs = Math.abs(v);
-  if (abs >= 1000) return (v / 1000).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + "k";
-  return v.toLocaleString("en-IN", { maximumFractionDigits: abs < 10 ? 1 : 0 });
+function arApHandleBulkFile(e) {
+  const file = e.target.files[0];
+  arApBulkParsed = null;
+  $("arApBulkAppend").disabled = true;
+  $("arApBulkReplace").disabled = true;
+  $("arApBulkErrors").innerHTML = "";
+  $("arApBulkPreview").innerHTML = "";
+  if (!file) return;
+  if (typeof XLSX === "undefined") { arApSetBulkStatus("Spreadsheet library not loaded — cannot read files (check internet access).", "err"); return; }
+
+  const isCsv = /\.csv$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = ev => {
+    let aoa;
+    try {
+      // CSV is read as UTF-8 text (so ₹ and Indian names survive); Excel files as binary
+      const wb = isCsv
+        ? XLSX.read(String(ev.target.result).replace(/^﻿/, ""), { type: "string", raw: true })
+        : XLSX.read(new Uint8Array(ev.target.result), { type: "array", cellDates: true, raw: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    } catch (err) {
+      arApSetBulkStatus("Could not read this file: " + (err.message || err), "err");
+      return;
+    }
+
+    const which = currentDataTab === "payables" ? "payables" : "receivables";
+    const parsed = arApParseSheetRows(aoa);
+    const errBox = $("arApBulkErrors");
+    if (parsed.errors.length) {
+      const ul = document.createElement("div");
+      ul.className = "errlist";
+      parsed.errors.forEach(m => { const d = document.createElement("div"); d.textContent = "• " + m; ul.appendChild(d); });
+      errBox.appendChild(ul);
+      arApSetBulkStatus(`${file.name}: ${parsed.rows.length} row(s) read, ${parsed.errors.length} error(s). Fix the rows listed and upload again — import is blocked until the file is clean.`, "err");
+    } else {
+      arApBulkParsed = { rows: parsed.rows.map(({ _row, _bad, ...r }) => r), which };
+      arApSetBulkStatus(`${file.name}: ${parsed.rows.length} row(s) valid and ready to import into ${which === "payables" ? "Payables" : "Receivables"}.`, "ok");
+      $("arApBulkAppend").disabled = false;
+      $("arApBulkReplace").disabled = false;
+    }
+
+    // preview (first 50 rows)
+    const pw = document.createElement("div");
+    pw.className = "previewwrap";
+    const t = document.createElement("table");
+    const th = document.createElement("tr");
+    ["Row", ...arApTemplateCols()].forEach(h => { const c = document.createElement("th"); c.textContent = h; th.appendChild(c); });
+    t.appendChild(th);
+    parsed.rows.slice(0, 50).forEach(r => {
+      const tr = document.createElement("tr");
+      if (r._bad) tr.className = "badrow";
+      [r._row, r.date || "", r.customer, r.due || "", r.amount === null ? "" : r.amount, r.balance === null ? "(blank)" : r.balance].forEach(v => {
+        const td = document.createElement("td");
+        td.textContent = String(v);
+        tr.appendChild(td);
+      });
+      t.appendChild(tr);
+    });
+    if (parsed.rows.length > 50) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.style.textAlign = "center";
+      td.textContent = `+ ${parsed.rows.length - 50} more row(s)`;
+      tr.appendChild(td);
+      t.appendChild(tr);
+    }
+    pw.appendChild(t);
+    $("arApBulkPreview").appendChild(pw);
+  };
+  if (isCsv) reader.readAsText(file, "utf-8"); else reader.readAsArrayBuffer(file);
 }
 
-function formatAccountsMonth(month) {
-  const [y, m] = String(month).split("-").map(Number);
-  if (!y || !m) return String(month);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+async function arApCommitBulk(mode) {
+  if (!arApBulkParsed) return;
+  const which = arApBulkParsed.which;
+  const endpoint = which;
+  if (mode === "replace") {
+    if (!confirm(`Replace ALL existing ${which} data (${arApEditRows.length} row(s)) with ${arApBulkParsed.rows.length} uploaded row(s)? This cannot be undone.`)) return;
+  }
+  const nameField = which === "payables" ? "vendor_name" : "customer_name";
+  const rows = arApBulkParsed.rows.map(r => ({ [nameField]: r.customer, invoice_date: r.date, due_date: r.due, invoice_amount: r.amount, balance: r.balance }));
+
+  try {
+    const result = await api(`/api/admin/${endpoint}/bulk-import`, { method: "POST", body: JSON.stringify({ mode, rows }) });
+    arApResetBulk();
+    await loadArApRecords();
+    arApSetBulkStatus(`${result.inserted} row(s) ${mode === "replace" ? "replaced" : "appended"} into ${which === "payables" ? "Payables" : "Receivables"}. Dashboard updated.`, "ok");
+  } catch (err) {
+    arApSetBulkStatus(err.message, "err");
+  }
 }
 
-function formatAccountsAmount(value) {
-  const v = (Number(value) || 0) / ACCOUNTS_DISPLAY_DIVISOR;
-  return `₹ ${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ACCOUNTS_UNIT_SUFFIX}`;
-}
-
-function openAccountsDataEntry() {
-  if (!token) { showLogin(); return; }
-  currentDataTab = "accounts";
-  editingId = null;
-  setupDataTabs();
-  setPage("data");
+function setupArAp() {
+  $("arApAddRowBtn").onclick = arApAddRow;
+  $("arApBulkFile").onchange = arApHandleBulkFile;
+  $("arApBulkAppend").onclick = () => arApCommitBulk("append");
+  $("arApBulkReplace").onclick = () => arApCommitBulk("replace");
+  document.querySelectorAll("[data-ar-tpl]").forEach(b => { b.onclick = () => arApDownloadTemplate(b.dataset.arTpl); });
+  $("accountsAddDataBtn").onclick = () => {
+    if (!token) { showLogin(); return; }
+    currentDataTab = "receivables";
+    editingId = null;
+    setupDataTabs();
+    setPage("data");
+  };
 }

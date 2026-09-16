@@ -237,24 +237,48 @@ router.get("/reports", async (req, res, next) => {
   }
 });
 
-// Accounts KPI dashboard source data: every monthly financial row, ascending by
-// month. Aggregation and date-range filtering happen client-side on this list.
-router.get("/accounts", async (req, res, next) => {
+// Accounts (Receivables & Payables) source data: every invoice-level row.
+// Aging, KPIs, DSO and the trend chart are all computed client-side from
+// these raw lists, same as the FY/date-range and As-of-date filters.
+function toDateStr(d) {
+  return d instanceof Date ? d.toISOString().slice(0, 10) : d;
+}
+
+router.get("/receivables", async (req, res, next) => {
   try {
     const result = await query(
-      `select id,t_month,sales_order_amount,purchase_order_amount,invoice_amount
-       from accounts_data order by t_month asc`
+      `select id,customer_name,invoice_date,due_date,invoice_amount,balance
+       from receivables_data order by invoice_date asc,created_at asc`
     );
     res.json({
-      module: "accounts",
-      // Amounts are stored in Lakhs; the dashboard displays them in Crores.
-      unitLabel: "₹ in Crores",
       rows: result.rows.map(r => ({
         id: r.id,
-        month: r.t_month,
-        salesOrder: Number(r.sales_order_amount),
-        purchaseOrder: Number(r.purchase_order_amount),
-        invoice: Number(r.invoice_amount)
+        customer: r.customer_name,
+        date: toDateStr(r.invoice_date),
+        due: toDateStr(r.due_date),
+        amount: Number(r.invoice_amount),
+        balance: r.balance === null ? null : Number(r.balance)
+      }))
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/payables", async (req, res, next) => {
+  try {
+    const result = await query(
+      `select id,vendor_name,invoice_date,due_date,invoice_amount,balance
+       from payables_data order by invoice_date asc,created_at asc`
+    );
+    res.json({
+      rows: result.rows.map(r => ({
+        id: r.id,
+        customer: r.vendor_name,
+        date: toDateStr(r.invoice_date),
+        due: toDateStr(r.due_date),
+        amount: Number(r.invoice_amount),
+        balance: r.balance === null ? null : Number(r.balance)
       }))
     });
   } catch (err) {

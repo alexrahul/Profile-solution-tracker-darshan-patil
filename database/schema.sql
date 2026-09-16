@@ -135,6 +135,30 @@ CREATE TABLE IF NOT EXISTS accounts_data(
  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Invoice-level Receivables / Payables (Accounts module, v2.9+). accounts_data
+-- above is the older monthly-totals model and is no longer used by the app.
+CREATE TABLE IF NOT EXISTS receivables_data(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ customer_name VARCHAR(255) NOT NULL,
+ invoice_date DATE NOT NULL,
+ due_date DATE NOT NULL,
+ invoice_amount NUMERIC(20,2) NOT NULL CHECK (invoice_amount>=0),
+ balance NUMERIC(20,2) CHECK (balance IS NULL OR balance>=0),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payables_data(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ vendor_name VARCHAR(255) NOT NULL,
+ invoice_date DATE NOT NULL,
+ due_date DATE NOT NULL,
+ invoice_amount NUMERIC(20,2) NOT NULL CHECK (invoice_amount>=0),
+ balance NUMERIC(20,2) CHECK (balance IS NULL OR balance>=0),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS calendar_connections(
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -199,6 +223,10 @@ CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks_data(task_date);
 CREATE INDEX IF NOT EXISTS idx_notes_date ON notes_data(note_date);
 CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders_data(reminder_date);
 CREATE INDEX IF NOT EXISTS idx_accounts_month ON accounts_data(t_month);
+CREATE INDEX IF NOT EXISTS idx_receivables_date ON receivables_data(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_receivables_customer ON receivables_data(customer_name);
+CREATE INDEX IF NOT EXISTS idx_payables_date ON payables_data(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_payables_vendor ON payables_data(vendor_name);
 
 DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
 CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -222,6 +250,10 @@ DROP TRIGGER IF EXISTS trg_reminders_updated_at ON reminders_data;
 CREATE TRIGGER trg_reminders_updated_at BEFORE UPDATE ON reminders_data FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_accounts_updated_at ON accounts_data;
 CREATE TRIGGER trg_accounts_updated_at BEFORE UPDATE ON accounts_data FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_receivables_updated_at ON receivables_data;
+CREATE TRIGGER trg_receivables_updated_at BEFORE UPDATE ON receivables_data FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_payables_updated_at ON payables_data;
+CREATE TRIGGER trg_payables_updated_at BEFORE UPDATE ON payables_data FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_calendar_connections_updated_at ON calendar_connections;
 CREATE TRIGGER trg_calendar_connections_updated_at BEFORE UPDATE ON calendar_connections FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_calendar_events_updated_at ON calendar_events;

@@ -18,14 +18,26 @@ const cfg = {
       description: { required: false, type: "text" }
     }
   },
-  accounts: {
-    table: "accounts_data",
-    orderBy: "t_month asc",
+  receivables: {
+    table: "receivables_data",
+    orderBy: "invoice_date asc,created_at asc",
     fields: {
-      t_month: { required: true, type: "month", aliases: ["month"] },
-      sales_order_amount: { required: true, type: "number" },
-      purchase_order_amount: { required: true, type: "number" },
-      invoice_amount: { required: true, type: "number" }
+      customer_name: { required: true, type: "text" },
+      invoice_date: { required: true, type: "date" },
+      due_date: { required: true, type: "date" },
+      invoice_amount: { required: true, type: "number" },
+      balance: { required: false, type: "number" }
+    }
+  },
+  payables: {
+    table: "payables_data",
+    orderBy: "invoice_date asc,created_at asc",
+    fields: {
+      vendor_name: { required: true, type: "text" },
+      invoice_date: { required: true, type: "date" },
+      due_date: { required: true, type: "date" },
+      invoice_amount: { required: true, type: "number" },
+      balance: { required: false, type: "number" }
     }
   },
   meetings: {
@@ -118,15 +130,6 @@ function normalizeValue(field, rule, raw) {
     const value = String(raw).trim();
     if (!DATE_RE.test(value)) {
       const e = new Error(`${field} must be in YYYY-MM-DD format`);
-      e.status = 400;
-      throw e;
-    }
-    return value;
-  }
-  if (rule.type === "month") {
-    const value = String(raw).trim();
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
-      const e = new Error(`${field} must be in YYYY-MM format`);
       e.status = 400;
       throw e;
     }
@@ -354,6 +357,44 @@ router.post("/:module/bulk", csvUpload.single("file"), async (req, res, next) =>
     }
     await client.query("commit");
     res.json({ inserted });
+  } catch (e) {
+    try { await client.query("rollback"); } catch {}
+    next(e);
+  } finally {
+    client.release();
+  }
+});
+
+// Receivables/Payables bulk import: unlike the generic CSV-file /:module/bulk
+// route above, the file (.xlsx/.xls/.csv) is parsed and validated in the
+// browser (SheetJS) so Excel dates, Indian-comma amounts and per-row error
+// messages all come from the same logic the upload preview already showed the
+// admin - this endpoint just persists the already-clean rows.
+const BULK_IMPORT_MODULES = new Set(["receivables", "payables"]);
+router.post("/:module/bulk-import", async (req, res, next) => {
+  if (!BULK_IMPORT_MODULES.has(req.params.module)) {
+    return res.status(404).json({ message: "Bulk import is only available for receivables and payables" });
+  }
+
+  const client = await pool.connect();
+  try {
+    const c = getCfg(req.params.module);
+    const mode = req.body?.mode === "replace" ? "replace" : "append";
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+    if (!rows || !rows.length) return res.status(400).json({ message: "rows must be a non-empty array" });
+
+    await client.query("begin");
+    if (mode === "replace") {
+      await client.query(`delete from ${qid(c.table)}`);
+    }
+    let inserted = 0;
+    for (const row of rows) {
+      const { columns, values } = normalizePayload(c, row);
+      await client.query(insertSql(c, columns), values);
+      inserted += 1;
+    }
+    await client.query("commit");
+    res.json({ inserted, mode });
   } catch (e) {
     try { await client.query("rollback"); } catch {}
     next(e);
