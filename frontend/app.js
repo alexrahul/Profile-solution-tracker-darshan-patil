@@ -614,7 +614,8 @@ function renderMeetingRow(m) {
   // calendarName is only set for a non-primary source calendar (e.g. a shared
   // "Other calendar"), so a primary-calendar row renders exactly as before.
   const subtitleParts = [m.team, m.calendarName].filter(Boolean).map(esc);
-  return `<div class="meeting-row"><b>${esc(m.time || "")}</b><div><strong>${nameHtml}</strong><small>${subtitleParts.join(" • ")}</small></div>${tagHtml}</div>`;
+  const timeLabel = m.time || (m.allDay ? "All day" : "");
+  return `<div class="meeting-row"><b>${esc(timeLabel)}</b><div><strong>${nameHtml}</strong><small>${subtitleParts.join(" • ")}</small></div>${tagHtml}</div>`;
 }
 
 async function refreshCalendarMonthEvents() {

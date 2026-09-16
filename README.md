@@ -1,5 +1,20 @@
 # Profile Solutions Dashboard v2.5.0
 
+## v2.8.1 changes
+
+- **Fixed:** synced Google/Microsoft meeting times in Meeting Schedule (and
+  View All) were off by exactly -5:30 - `toMeetingRow` formatted the stored
+  instant with `timeZone: "UTC"` instead of India time. The stored timestamps
+  were already correct (Google/Microsoft send an explicit offset; Postgres
+  normalizes it on insert) - no data was wrong, only the display. No resync
+  was needed or performed.
+- Meeting start/end times and day-grouping for synced calendar events are now
+  always formatted/matched in `Asia/Kolkata`, independent of the browser's or
+  server's local timezone - fixes meetings landing on the wrong day near
+  midnight IST too.
+- All-day events keep their plain calendar date (no timezone conversion
+  applied) and now render as "All day" instead of a shifted clock time.
+
 ## v2.8 changes
 
 - **Fixed:** connected Google/Microsoft calendars only ever synced the account's

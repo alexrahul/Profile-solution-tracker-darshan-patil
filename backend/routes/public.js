@@ -4,6 +4,22 @@ import { query } from "../db.js";
 const router = Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Meeting Schedule always displays in India time, independent of the browser's
+// or the server/database session's local timezone. calendar_events.start_time
+// is a TIMESTAMPTZ holding the correct absolute instant (Google/Microsoft send
+// an explicit UTC offset; Postgres normalizes it on insert) - only the display
+// layer converts it, never the stored value.
+const DISPLAY_TIME_ZONE = "Asia/Kolkata";
+const istDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: DISPLAY_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" });
+const istTimeFormatter = new Intl.DateTimeFormat("en-US", { timeZone: DISPLAY_TIME_ZONE, hour: "numeric", minute: "2-digit" });
+
+function toIstDateString(date) {
+  return istDateFormatter.format(date); // en-CA formats as YYYY-MM-DD
+}
+function toIstTimeString(date) {
+  return istTimeFormatter.format(date);
+}
+
 function getDateParam(req) {
   const selectedDate = String(req.query.date || "").trim();
   if (!DATE_RE.test(selectedDate)) {
@@ -15,21 +31,30 @@ function getDateParam(req) {
 }
 
 const calendarEventsSql = `
-  select ce.id, ce.subject, ce.start_time, ce.end_time, ce.meeting_link, ce.location, ce.attendees,
+  select ce.id, ce.subject, ce.start_time, ce.end_time, ce.all_day, ce.meeting_link, ce.location, ce.attendees,
          cc.provider, cs.calendar_name, cs.is_primary as calendar_is_primary
   from calendar_events ce
   join calendar_connections cc on cc.id = ce.calendar_connection_id
   left join calendar_selections cs
     on cs.calendar_connection_id = ce.calendar_connection_id
    and cs.external_calendar_id = ce.external_calendar_id
-  where cc.is_active = true and ce.start_time::date = $1::date
+  where cc.is_active = true
+    -- All-day events are stored as a bare UTC-midnight-anchored calendar date
+    -- (no real timezone attached) and must keep that date as-is. Timed events
+    -- are matched by their India calendar date, same as they're displayed -
+    -- so a meeting just after midnight IST still falls under the right day
+    -- even if the DB/session default timezone is UTC.
+    and (case when ce.all_day then ce.start_time::date
+              else (ce.start_time at time zone 'Asia/Kolkata')::date end) = $1::date
   order by ce.start_time`;
 
 function toMeetingRow(event) {
+  const isAllDay = Boolean(event.all_day);
   return {
     id: event.id,
-    date: event.start_time.toISOString().slice(0, 10),
-    time: event.start_time.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }),
+    date: isAllDay ? event.start_time.toISOString().slice(0, 10) : toIstDateString(event.start_time),
+    time: isAllDay ? null : toIstTimeString(event.start_time),
+    allDay: isAllDay,
     name: event.subject,
     team: event.location || null,
     room: null,
