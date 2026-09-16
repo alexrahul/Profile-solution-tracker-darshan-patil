@@ -49,7 +49,7 @@ BEGIN
     AND tc.table_name = 'calendar_events'
     AND tc.constraint_type = 'UNIQUE'
   GROUP BY tc.constraint_name
-  HAVING array_agg(kcu.column_name ORDER BY kcu.ordinal_position) = ARRAY['calendar_connection_id','external_event_id'];
+  HAVING array_agg(kcu.column_name::text ORDER BY kcu.ordinal_position) = ARRAY['calendar_connection_id','external_event_id']::text[];
 
   IF old_constraint IS NOT NULL THEN
     EXECUTE format('ALTER TABLE calendar_events DROP CONSTRAINT %I', old_constraint);
