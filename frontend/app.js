@@ -17,6 +17,7 @@ let manpowerImageIndex = 0;
 let inlineImageZoom = 1;
 let imageZoom = 1;
 let hideDashboard = localStorage.getItem("ps_hide_dashboard") === "true";
+let tvView = localStorage.getItem("ps_tv_view") === "true";
 
 const dataModules = {
   calendar:{label:"Calendar Data", endpoint:"calendar", fields:[
@@ -86,12 +87,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDashboardVisibility();
   setupCalendarIntegration();
   setupAccounts();
+  setupTvView();
 
   await restoreAuthSession();
   if (currentUser) await loadDashboardPreference();
   updateAuthUI();
   setPage(calendarRedirectStatus && token ? "settings" : "dashboard");
   renderDashboardVisibility();
+  renderTvView();
 
   if (!hideDashboard) {
     await refreshCalendarMonthEvents();
@@ -522,6 +525,27 @@ function setupDashboardVisibility() {
       await refreshDashboard();
     }
   };
+}
+
+// TV View is a presentation-only toggle (larger text/spacing for viewing from
+// a distance) - it does not gate on screen size, since Smart TV browsers can
+// report a smaller viewport than their physical resolution. The preference is
+// per-browser (localStorage), same pattern as Hide Data.
+function setupTvView() {
+  $("tvViewBtn").onclick = () => {
+    tvView = !tvView;
+    localStorage.setItem("ps_tv_view", String(tvView));
+    renderTvView();
+  };
+}
+
+function renderTvView() {
+  document.body.classList.toggle("tv-view", tvView);
+  const btn = $("tvViewBtn");
+  if (btn) {
+    btn.textContent = tvView ? "🖥 Exit TV View" : "📺 TV View";
+    btn.setAttribute("aria-pressed", String(tvView));
+  }
 }
 
 async function loadDashboardPreference() {
