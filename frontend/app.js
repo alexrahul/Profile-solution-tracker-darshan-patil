@@ -302,6 +302,8 @@ function updateCalendarProviderUI(provider, connection) {
   const emailEl = $(`${provider}CalendarEmail`);
   const btn = $(`${provider}CalendarBtn`);
   const syncBtn = $(`${provider}CalendarSyncBtn`);
+  const manageBtn = $(`${provider}CalendarManageBtn`);
+  const listPanel = $(`${provider}CalendarList`);
   const label = provider === "google" ? "Google" : "Microsoft";
 
   if (connection) {
@@ -314,6 +316,8 @@ function updateCalendarProviderUI(provider, connection) {
     syncBtn.disabled = false;
     syncBtn.textContent = "Sync Now";
     syncBtn.onclick = () => syncCalendarNow(connection.id, syncBtn);
+    manageBtn.classList.remove("hidden");
+    manageBtn.onclick = () => toggleCalendarManage(provider, connection.id);
   } else {
     statusEl.textContent = "Not Connected";
     statusEl.classList.remove("connected");
@@ -322,7 +326,72 @@ function updateCalendarProviderUI(provider, connection) {
     btn.onclick = () => connectCalendar(provider);
     syncBtn.classList.add("hidden");
     syncBtn.onclick = null;
+    manageBtn.classList.add("hidden");
+    manageBtn.onclick = null;
+    listPanel.classList.add("hidden");
+    listPanel.innerHTML = "";
   }
+}
+
+// Lists the calendars available on a connected account (My Calendars + Google
+// "Other calendars") so the admin can choose which ones feed Meeting Schedule.
+async function toggleCalendarManage(provider, connectionId) {
+  const panel = $(`${provider}CalendarList`);
+  if (!panel.classList.contains("hidden")) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  panel.innerHTML = `<p class="calendar-list-loading">Loading calendars…</p>`;
+  try {
+    const result = await api(`/api/calendar/connections/${connectionId}/calendars`);
+    renderCalendarList(provider, connectionId, result.calendars || []);
+  } catch (err) {
+    panel.innerHTML = `<div class="form-error">${esc(err.message)}</div>`;
+  }
+}
+
+function renderCalendarList(provider, connectionId, calendars) {
+  const panel = $(`${provider}CalendarList`);
+  if (!calendars.length) {
+    panel.innerHTML = `<p class="calendar-list-empty">No calendars found for this account.</p>`;
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="calendar-list-items">
+      ${calendars.map(c => `
+        <label class="calendar-list-item${c.readable === false ? " disabled" : ""}">
+          <input type="checkbox" data-cal-id="${escAttr(c.external_calendar_id)}" ${c.selected ? "checked" : ""} ${c.readable === false ? "disabled" : ""}>
+          <span class="calendar-list-name">${esc(c.calendar_name || c.external_calendar_id)}${c.is_primary ? " <em>(Primary)</em>" : ""}</span>
+          <span class="calendar-list-role">${esc(c.access_role || "")}</span>
+          ${c.last_sync_error ? `<span class="calendar-list-error">${esc(c.last_sync_error)}</span>` : ""}
+        </label>`).join("")}
+    </div>
+    <div class="calendar-list-actions">
+      <button type="button" class="primary" id="${provider}CalendarSaveBtn">Save Selection</button>
+      <span class="calendar-list-status" id="${provider}CalendarSaveStatus"></span>
+    </div>`;
+
+  $(`${provider}CalendarSaveBtn`).onclick = async () => {
+    const statusEl = $(`${provider}CalendarSaveStatus`);
+    const selected = Array.from(panel.querySelectorAll("input[type=checkbox]:checked")).map(el => el.dataset.calId);
+    statusEl.textContent = "Saving…";
+    try {
+      const result = await api(`/api/calendar/connections/${connectionId}/calendars`, {
+        method: "PUT",
+        body: JSON.stringify({ selectedCalendarIds: selected })
+      });
+      renderCalendarList(provider, connectionId, result.calendars || []);
+      const errCount = (result.errors || []).length;
+      $(`${provider}CalendarSaveStatus`).textContent = `Saved. Synced ${result.synced} event${result.synced === 1 ? "" : "s"} across ${result.calendars} calendar${result.calendars === 1 ? "" : "s"}${errCount ? ` — ${errCount} calendar${errCount === 1 ? "" : "s"} had errors (see below).` : "."}`;
+      await refreshCalendarMonthEvents();
+      if (!hideDashboard) await refreshDashboard({ silent: true });
+    } catch (err) {
+      statusEl.textContent = err.message;
+    }
+  };
 }
 
 async function syncCalendarNow(id, syncBtn) {
@@ -332,8 +401,11 @@ async function syncCalendarNow(id, syncBtn) {
   try {
     const result = await api(`/api/calendar/connections/${id}/sync`, { method: "POST" });
     msg.classList.remove("hidden");
-    msg.className = "calendar-connect-message success";
-    msg.textContent = `Synced ${result.synced} event${result.synced === 1 ? "" : "s"} just now.`;
+    const errCount = (result.errors || []).length;
+    msg.className = `calendar-connect-message ${errCount ? "form-error" : "success"}`;
+    msg.textContent = errCount
+      ? `Synced ${result.synced} event${result.synced === 1 ? "" : "s"} across ${result.calendars} calendar${result.calendars === 1 ? "" : "s"}, but ${errCount} calendar${errCount === 1 ? "" : "s"} failed: ${result.errors.map(e => e.calendar).join(", ")}.`
+      : `Synced ${result.synced} event${result.synced === 1 ? "" : "s"} across ${result.calendars} calendar${result.calendars === 1 ? "" : "s"} just now.`;
     await refreshCalendarMonthEvents();
   } catch (err) {
     msg.classList.remove("hidden");
@@ -539,7 +611,10 @@ function renderMeetingRow(m) {
   const tagHtml = m.provider
     ? `<span class="room-tag provider-tag ${m.provider === "GOOGLE" ? "google" : "microsoft"}">${m.provider === "GOOGLE" ? "Meet" : "Teams"}</span>`
     : `<span class="room-tag ${String(m.room || "").includes("2") ? "green" : ""}">${esc(m.room || "")}</span>`;
-  return `<div class="meeting-row"><b>${esc(m.time || "")}</b><div><strong>${nameHtml}</strong><small>${esc(m.team || "")}</small></div>${tagHtml}</div>`;
+  // calendarName is only set for a non-primary source calendar (e.g. a shared
+  // "Other calendar"), so a primary-calendar row renders exactly as before.
+  const subtitleParts = [m.team, m.calendarName].filter(Boolean).map(esc);
+  return `<div class="meeting-row"><b>${esc(m.time || "")}</b><div><strong>${nameHtml}</strong><small>${subtitleParts.join(" • ")}</small></div>${tagHtml}</div>`;
 }
 
 async function refreshCalendarMonthEvents() {

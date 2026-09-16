@@ -15,9 +15,13 @@ function getDateParam(req) {
 }
 
 const calendarEventsSql = `
-  select ce.id, ce.subject, ce.start_time, ce.end_time, ce.meeting_link, ce.location, ce.attendees, cc.provider
+  select ce.id, ce.subject, ce.start_time, ce.end_time, ce.meeting_link, ce.location, ce.attendees,
+         cc.provider, cs.calendar_name, cs.is_primary as calendar_is_primary
   from calendar_events ce
   join calendar_connections cc on cc.id = ce.calendar_connection_id
+  left join calendar_selections cs
+    on cs.calendar_connection_id = ce.calendar_connection_id
+   and cs.external_calendar_id = ce.external_calendar_id
   where cc.is_active = true and ce.start_time::date = $1::date
   order by ce.start_time`;
 
@@ -30,6 +34,9 @@ function toMeetingRow(event) {
     team: event.location || null,
     room: null,
     provider: event.provider,
+    // Only shown for a non-primary source calendar (e.g. a shared "Other
+    // calendar") so the primary calendar's rows look exactly as before.
+    calendarName: event.calendar_is_primary === false ? event.calendar_name : null,
     meetingLink: event.meeting_link,
     sortKey: event.start_time.toISOString()
   };

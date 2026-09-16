@@ -1135,6 +1135,81 @@ td {
   color: #86EFAC
 }
 
+.calendar-list {
+  margin: -4px 0 13px;
+  padding: 12px;
+  background: #0D1422;
+  border: 1px solid var(--border);
+  border-radius: 9px
+}
+
+.calendar-list-loading,
+.calendar-list-empty {
+  font-size: 9px;
+  color: #9CA3AF;
+  margin: 0
+}
+
+.calendar-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px
+}
+
+.calendar-list-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  color: #E5E7EB
+}
+
+.calendar-list-item:last-child {
+  border-bottom: 0
+}
+
+.calendar-list-item.disabled {
+  opacity: .5
+}
+
+.calendar-list-item input[type="checkbox"] {
+  width: 13px;
+  height: 13px
+}
+
+.calendar-list-name em {
+  color: #9CA3AF;
+  font-style: normal;
+  font-size: 8px
+}
+
+.calendar-list-role {
+  font-size: 8px;
+  color: #9CA3AF;
+  text-transform: capitalize
+}
+
+.calendar-list-error {
+  grid-column: 2 / span 2;
+  font-size: 8px;
+  color: #FCA5A5
+}
+
+.calendar-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px
+}
+
+.calendar-list-status {
+  font-size: 9px;
+  color: #9CA3AF
+}
+
 .provider-tag.google {
   background: #10213F;
   color: #93C5FD

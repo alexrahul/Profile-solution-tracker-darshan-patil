@@ -151,9 +151,25 @@ CREATE TABLE IF NOT EXISTS calendar_connections(
  UNIQUE(user_id,provider)
 );
 
+CREATE TABLE IF NOT EXISTS calendar_selections(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ calendar_connection_id UUID NOT NULL REFERENCES calendar_connections(id) ON DELETE CASCADE,
+ external_calendar_id VARCHAR(500) NOT NULL,
+ calendar_name VARCHAR(255),
+ access_role VARCHAR(50),
+ is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+ selected BOOLEAN NOT NULL DEFAULT FALSE,
+ last_synced_at TIMESTAMPTZ,
+ last_sync_error TEXT,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ UNIQUE(calendar_connection_id,external_calendar_id)
+);
+
 CREATE TABLE IF NOT EXISTS calendar_events(
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  calendar_connection_id UUID NOT NULL REFERENCES calendar_connections(id) ON DELETE CASCADE,
+ external_calendar_id VARCHAR(500) NOT NULL DEFAULT 'primary',
  external_event_id VARCHAR(255) NOT NULL,
  subject VARCHAR(500),
  description TEXT,
@@ -166,11 +182,12 @@ CREATE TABLE IF NOT EXISTS calendar_events(
  last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
- UNIQUE(calendar_connection_id,external_event_id)
+ UNIQUE(calendar_connection_id,external_calendar_id,external_event_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_dashboard_preferences_user ON dashboard_preferences(user_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_connections_user ON calendar_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_selections_connection ON calendar_selections(calendar_connection_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_connection ON calendar_events(calendar_connection_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_data(event_date);
@@ -209,3 +226,5 @@ DROP TRIGGER IF EXISTS trg_calendar_connections_updated_at ON calendar_connectio
 CREATE TRIGGER trg_calendar_connections_updated_at BEFORE UPDATE ON calendar_connections FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_calendar_events_updated_at ON calendar_events;
 CREATE TRIGGER trg_calendar_events_updated_at BEFORE UPDATE ON calendar_events FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_calendar_selections_updated_at ON calendar_selections;
+CREATE TRIGGER trg_calendar_selections_updated_at BEFORE UPDATE ON calendar_selections FOR EACH ROW EXECUTE FUNCTION set_updated_at();

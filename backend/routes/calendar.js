@@ -4,7 +4,7 @@ import { query } from "../db.js";
 import { requireAdmin } from "../auth.js";
 import { encryptToken } from "../cryptoUtil.js";
 import { buildAuthUrl, exchangeCode, fetchAccountEmail } from "../services/calendarProviders.js";
-import { syncConnection } from "../services/calendarSync.js";
+import { syncConnection, listCalendarsForConnection, updateCalendarSelections } from "../services/calendarSync.js";
 
 const router = Router();
 
@@ -126,8 +126,58 @@ router.post("/connections/:id/sync", requireAdmin, async (req, res, next) => {
     if (connection.user_id !== req.user.sub) return res.status(403).json({ message: "Not your calendar connection" });
     if (!connection.is_active) return res.status(409).json({ message: "Connection is inactive. Reconnect to resume syncing." });
 
-    const synced = await syncConnection(connection);
-    res.json({ synced });
+    const result = await syncConnection(connection);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Lists every calendar the connected account can see (My Calendars + "Other
+// calendars"), including which are currently selected for Meeting Schedule and
+// any per-calendar sync error (e.g. a free/busy-only share). This does a live
+// discovery call so newly-added "Other calendars" show up without waiting for
+// the next scheduled sync.
+router.get("/connections/:id/calendars", requireAdmin, async (req, res, next) => {
+  try {
+    const existing = await query(`select * from calendar_connections where id=$1 limit 1`, [req.params.id]);
+    const connection = existing.rows[0];
+    if (!connection) return res.status(404).json({ message: "Connection not found" });
+    if (connection.user_id !== req.user.sub) return res.status(403).json({ message: "Not your calendar connection" });
+    if (!connection.is_active) return res.status(409).json({ message: "Connection is inactive. Reconnect to resume syncing.", code: "RECONNECT_REQUIRED" });
+
+    const calendars = await listCalendarsForConnection(connection);
+    res.json({ calendars });
+  } catch (err) {
+    if (err.code === "invalid_grant") {
+      await query(`update calendar_connections set is_active=false where id=$1`, [req.params.id]);
+      return res.status(409).json({ message: "This calendar connection has expired. Reconnect it from Settings.", code: "RECONNECT_REQUIRED" });
+    }
+    next(err);
+  }
+});
+
+// Saves which calendars should feed Meeting Schedule, then re-syncs so newly
+// selected calendars populate immediately and deselected ones stop showing.
+router.put("/connections/:id/calendars", requireAdmin, async (req, res, next) => {
+  try {
+    const existing = await query(`select * from calendar_connections where id=$1 limit 1`, [req.params.id]);
+    const connection = existing.rows[0];
+    if (!connection) return res.status(404).json({ message: "Connection not found" });
+    if (connection.user_id !== req.user.sub) return res.status(403).json({ message: "Not your calendar connection" });
+    if (!connection.is_active) return res.status(409).json({ message: "Connection is inactive. Reconnect to resume syncing.", code: "RECONNECT_REQUIRED" });
+
+    const selectedCalendarIds = req.body?.selectedCalendarIds;
+    if (!Array.isArray(selectedCalendarIds)) {
+      return res.status(400).json({ message: "selectedCalendarIds must be an array of calendar ids" });
+    }
+
+    const syncResult = await updateCalendarSelections(connection, selectedCalendarIds);
+    const calendars = await query(
+      `select * from calendar_selections where calendar_connection_id=$1 order by is_primary desc,calendar_name`,
+      [connection.id]
+    );
+    res.json({ ...syncResult, calendars: calendars.rows });
   } catch (err) {
     next(err);
   }
