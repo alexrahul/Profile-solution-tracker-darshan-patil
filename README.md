@@ -1,5 +1,18 @@
 # Profile Solutions Dashboard v2.5.0
 
+## v2.9.1 changes
+
+- App-wide dark scrollbars: every scrollable region (main page, tables,
+  panels, the bulk-upload preview/error lists, dropdowns, modals, the image
+  viewer) now uses a slim dark-slate thumb and a track matching its own
+  surface (page background, or card colour for anything sitting on a card) -
+  no more default/white scrollbar tracks, corners or arrow buttons.
+  `::-webkit-scrollbar*` for Chrome/Edge/Safari, `scrollbar-width`/
+  `scrollbar-color` for Firefox.
+- Removed the decorative header widget (notification bell + "3" badge,
+  avatar circle, "Reema Shah" name dropdown) - it had no behavior. The page
+  title/subtitle and sidebar Logout are unaffected.
+
 ## v2.9 changes
 
 - **Accounts is now a Receivables & Payables dashboard**, replacing the v2.7
