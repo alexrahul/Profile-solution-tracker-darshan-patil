@@ -1595,6 +1595,15 @@ td {
   max-height: 420px
 }
 
+.ar-ap-scrolltable table {
+  font-size: 12px
+}
+
+.ar-ap-scrolltable th,
+.ar-ap-scrolltable td {
+  padding: 11px
+}
+
 .ar-ap-edit-scroll {
   max-height: 520px
 }
