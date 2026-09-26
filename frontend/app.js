@@ -603,22 +603,26 @@ function renderDashboard() {
   // height and scrolls vertically when the rows exceed the available space.
   $("meetingList").innerHTML = mergedMeetings.map(renderMeetingRow).join("") || emptyCompact("No meetings");
 
-  const d = (dashboardData.departments || [])[0];
-  $("departmentSchedule").innerHTML = d
-    ? `<div class="lunch-item"><div class="lunch-icon">♟</div><b>${esc(d.department || "")}</b><small>Department</small><span>${esc(d.start || "")} –<br>${esc(d.end || "")}</span><small>${esc(d.location || "")}</small></div>`
-    : `<div class="lunch-item"><div class="manpower-image-empty">No lunch schedule</div></div>`;
+  // department_schedule allows more than one row per date, so every department
+  // scheduled for the selected date is shown (the card scrolls internally via
+  // .lunch-row) rather than picking just the first one.
+  const depts = dashboardData.departments || [];
+  $("departmentSchedule").innerHTML = depts.length
+    ? depts.map(d => `<div class="lunch-item"><div class="lunch-icon">♟</div><b>${esc(d.department || "")}</b><small>Department</small><span>${esc(d.start || "")} –<br>${esc(d.end || "")}</span><small>${esc(d.location || "")}</small></div>`).join("")
+    : emptyCompact("No lunch meeting scheduled.");
 
-  $("taskList").innerHTML = (dashboardData.tasks || []).slice(0, 5).map(t =>
+  // tasks_data has no "critical" column or rule distinguishing critical tasks -
+  // every task for the selected date is shown here as-is. A true critical-only
+  // filter would need either a boolean/priority column on tasks_data (e.g.
+  // is_critical or a priority level) or an explicit rule (e.g. overdue tasks)
+  // agreed with the business and added via a migration.
+  $("taskList").innerHTML = (dashboardData.tasks || []).map(t =>
     `<div class="task-row"><input type="checkbox" ${t.status === "Completed" ? "checked" : ""} disabled><time>${esc(t.time || "")}</time><span>${esc(t.name || "")}</span><span class="task-status">${esc(t.status || "")}</span></div>`
-  ).join("") || emptyCompact("No tasks");
+  ).join("") || emptyCompact("No critical tasks assigned.");
 
-  $("quickNotes").innerHTML = (dashboardData.notes || []).slice(0, 5).map(n =>
+  $("quickNotes").innerHTML = (dashboardData.notes || []).map(n =>
     `<p class="note-row">• <strong>${esc(n.title || "")}</strong>${n.description ? ` — ${esc(n.description)}` : ""}</p>`
   ).join("") || emptyCompact("No notes");
-
-  $("reminderList").innerHTML = (dashboardData.reminders || []).slice(0, 5).map(r =>
-    `<div class="reminder-row"><time>${esc(r.time || "")}</time><span>•</span><p>${esc(r.description || "")}</p></div>`
-  ).join("") || emptyCompact("No reminders");
 
   renderManpowerImages();
 }
@@ -875,11 +879,9 @@ function imageExtension(mime) {
 function setupViewAllControls() {
   const meetingLink = document.querySelector(".meeting-card .card-title a");
   const departmentLink = document.querySelector(".lunch-card .card-title a");
-  const reminderLink = document.querySelector(".view-reminders");
 
   if (meetingLink) meetingLink.onclick = e => { e.preventDefault(); openDetailView("meetings", "Meeting Schedule"); };
   if (departmentLink) departmentLink.onclick = e => { e.preventDefault(); openDetailView("departments", "Department Schedule"); };
-  if (reminderLink) reminderLink.onclick = e => { e.preventDefault(); openDetailView("reminders", "Reminders"); };
 
   bindHeadingDetail(document.querySelector(".tasks-card .card-title"), "tasks", "Tasks");
   bindHeadingDetail(document.querySelector(".notes-card .card-title"), "notes", "Notes");

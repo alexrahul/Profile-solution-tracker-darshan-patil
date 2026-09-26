@@ -330,6 +330,17 @@ body.dashboard-mode .main {
   min-width: 0
 }
 
+.icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round
+}
+
 .card-title h3 {
   font-size: 14px;
   margin: 0;
@@ -367,15 +378,24 @@ body.dashboard-mode .main {
   margin: 0 0 0 auto
 }
 
+/* Three-column dashboard: Manpower (full height) | middle stack | Meeting
+   Schedule (full height). The middle column is a plain flex column so its four
+   cards (Day Calendar, Tasks, Quick Notes, Daily Lunch Meet - in that order)
+   stack top-to-bottom independently of the two full-height side cards. */
 .dashboard-screen {
   height: 100%;
   display: grid;
-  grid-template-columns: 2fr 1.05fr 1.05fr 0.9fr;
-  grid-template-rows: 1fr 1fr;
-  grid-template-areas:
-    "manpower cal meet lunch"
-    "manpower tasks notes remind";
+  grid-template-columns: minmax(300px, 1.8fr) minmax(280px, 1fr) minmax(300px, 1.8fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 8px;
+  min-height: 0;
+}
+
+.middle-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -388,16 +408,17 @@ body.dashboard-mode .main {
 
 .compact-card-body {
   min-height: 0;
-  overflow: hidden
+  overflow-y: auto;
+  overflow-x: hidden
 }
 
 .calendar-card {
   min-width: 0;
-  grid-area: cal
+  flex: 0 0 auto;
+  min-height: 190px
 }
 
 .meeting-card {
-  grid-area: meet;
   display: flex;
   flex-direction: column;
   min-height: 0
@@ -409,31 +430,40 @@ body.dashboard-mode .main {
 }
 
 .lunch-card {
-  grid-area: lunch
+  flex: 0 0 auto;
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+  min-height: 90px
 }
 
-.tasks-card {
-  grid-area: tasks
+.lunch-card > .card-title,
+.lunch-card > .dashboard-date-chip {
+  flex: 0 0 auto
 }
 
-.notes-card {
-  grid-area: notes
-}
-
-.reminders-card {
-  grid-area: remind
-}
-
-.meeting-card,
-.lunch-card,
 .tasks-card,
-.notes-card,
-.reminders-card {
-  height: auto
+.notes-card {
+  flex: 1 1 0;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column
+}
+
+.tasks-card > .card-title,
+.tasks-card > .dashboard-date-chip,
+.notes-card > .card-title,
+.notes-card > .dashboard-date-chip {
+  flex: 0 0 auto
+}
+
+.tasks-card .compact-card-body,
+.notes-card .compact-card-body {
+  flex: 1 1 auto;
+  min-height: 0
 }
 
 .manpower-primary-card {
-  grid-area: manpower;
   min-height: 0;
   padding: 10px 12px;
   display: flex;
@@ -594,15 +624,16 @@ body.dashboard-mode .main {
 
 .lunch-row {
   margin-top: 4px;
-  height: calc(100% - 39px)
-}
-
-.single-lunch-row {
-  display: block
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px
 }
 
 .lunch-item {
-  height: 100%;
+  flex: 0 0 auto;
   background: #0D1422;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -612,6 +643,11 @@ body.dashboard-mode .main {
   flex-direction: column;
   align-items: center;
   justify-content: center
+}
+
+.lunch-row .manpower-image-empty {
+  flex: 1 1 auto;
+  height: auto
 }
 
 .lunch-icon {
@@ -1770,8 +1806,7 @@ body.tv-view .manpower-primary-card { padding: 20px }
    internally (header stays put) instead of clipping content - never
    auto-shrinking text to force a fit. */
 body.tv-view .tasks-card,
-body.tv-view .notes-card,
-body.tv-view .reminders-card {
+body.tv-view .notes-card {
   display: flex;
   flex-direction: column;
   min-height: 0
@@ -1779,19 +1814,15 @@ body.tv-view .reminders-card {
 body.tv-view .tasks-card>.card-title,
 body.tv-view .tasks-card>.dashboard-date-chip,
 body.tv-view .notes-card>.card-title,
-body.tv-view .notes-card>.dashboard-date-chip,
-body.tv-view .reminders-card>.card-title,
-body.tv-view .reminders-card>.dashboard-date-chip {
+body.tv-view .notes-card>.dashboard-date-chip {
   flex: 0 0 auto
 }
 body.tv-view .tasks-card .compact-card-body,
-body.tv-view .notes-card .compact-card-body,
-body.tv-view .reminders-card .compact-card-body {
+body.tv-view .notes-card .compact-card-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto
 }
-body.tv-view .reminders-card .view-reminders { flex: 0 0 auto }
 body.tv-view .calendar-card,
 body.tv-view .lunch-card {
   overflow-y: auto
@@ -1895,24 +1926,36 @@ body.tv-view .sidebar-visibility-toggle { font-size: clamp(18px, .9vw, 20px); li
     height: auto
   }
 
+  /* Tablet: Manpower and the middle stack sit side by side; Meeting Schedule
+     drops below, spanning the full width. */
   .dashboard-screen {
     height: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto;
+    grid-template-rows: auto auto;
     gap: 10px;
-    grid-template-areas:
-      "manpower manpower"
-      "cal meet"
-      "lunch tasks"
-      "notes remind";
-  }
-
-  .compact-dashboard-card {
-    min-height: 260px
   }
 
   .manpower-primary-card {
-    height: 430px
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 430px
+  }
+
+  .middle-col {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 430px
+  }
+
+  .meeting-card {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-height: 320px
+  }
+
+  .tasks-card,
+  .notes-card {
+    min-height: 160px
   }
 }
 
@@ -1935,12 +1978,16 @@ body.tv-view .sidebar-visibility-toggle { font-size: clamp(18px, .9vw, 20px); li
     grid-template-columns: 1fr
   }
 
+  /* Mobile: single column, stacked in source order - Manpower, then the
+     middle stack (Calendar/Tasks/Notes/Lunch), then Meeting Schedule. */
   .dashboard-screen {
-    grid-template-columns: 1fr;
-    grid-template-areas: none
+    display: flex;
+    flex-direction: column;
+    height: auto
   }
 
-  .manpower-primary-card {
+  .manpower-primary-card,
+  .meeting-card {
     height: 400px
   }
 
@@ -1979,12 +2026,12 @@ body.tv-view .sidebar-visibility-toggle { font-size: clamp(18px, .9vw, 20px); li
     font-size: 9px
   }
 
-  .dashboard-screen {
-    grid-template-columns: 1fr
-  }
-
   .compact-dashboard-card {
     min-height: 250px
+  }
+
+  .lunch-card {
+    max-height: none
   }
 
   .manpower-primary-card {

@@ -103,7 +103,7 @@ router.get("/dashboard", async (req, res, next) => {
       query(detailQueries.meetings.sql, [selectedDate]),
       query(
         `select id,schedule_date as date,department_name as department,start_time as start,end_time as "end",location
-         from department_schedule where schedule_date=$1 order by sort_order,created_at,id limit 1`,
+         from department_schedule where schedule_date=$1 order by sort_order,created_at,id`,
         [selectedDate]
       ),
       query(
