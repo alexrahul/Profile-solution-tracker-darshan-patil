@@ -608,7 +608,7 @@ function renderDashboard() {
   // .lunch-row) rather than picking just the first one.
   const depts = dashboardData.departments || [];
   $("departmentSchedule").innerHTML = depts.length
-    ? depts.map(d => `<div class="lunch-item"><div class="lunch-icon">♟</div><b>${esc(d.department || "")}</b><small>Department</small><span>${esc(d.start || "")} –<br>${esc(d.end || "")}</span><small>${esc(d.location || "")}</small></div>`).join("")
+    ? depts.map(d => `<div class="lunch-item"><b>${esc(d.department || "")}</b><span class="lunch-sep">•</span><span class="lunch-time">${esc(d.start || "")} – ${esc(d.end || "")}</span><span class="lunch-sep">•</span><span class="lunch-loc">${esc(d.location || "")}</span></div>`).join("")
     : emptyCompact("No lunch meeting scheduled.");
 
   // tasks_data has no "critical" column or rule distinguishing critical tasks -

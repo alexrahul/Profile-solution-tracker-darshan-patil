@@ -431,10 +431,9 @@ body.dashboard-mode .main {
 
 .lunch-card {
   flex: 0 0 auto;
-  max-height: 220px;
+  max-height: 150px;
   display: flex;
-  flex-direction: column;
-  min-height: 90px
+  flex-direction: column
 }
 
 .lunch-card > .card-title,
@@ -628,21 +627,26 @@ body.dashboard-mode .main {
   min-height: 0;
   overflow-y: auto;
   display: flex;
-  flex-direction: column;
-  gap: 6px
+  flex-direction: column
 }
 
+/* One clean row per department: "Name • time • location", wrapping in place
+   on narrow widths instead of growing into a tall boxed card. */
 .lunch-item {
   flex: 0 0 auto;
-  background: #0D1422;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 6px;
-  text-align: center;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  row-gap: 2px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  color: #D1D5DB
+}
+
+.lunch-row .lunch-item:last-child {
+  border-bottom: 0
 }
 
 .lunch-row .manpower-image-empty {
@@ -650,33 +654,27 @@ body.dashboard-mode .main {
   height: auto
 }
 
-.lunch-icon {
-  width: 36px;
-  height: 36px;
-  background: #1F2937;
-  color: #fff;
-  border: 1px solid #374151;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 7px
-}
-
 .lunch-item b {
-  font-size: 10px
+  color: #F9FAFB;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap
 }
 
-.lunch-item small {
-  font-size: 8px;
+.lunch-item .lunch-sep {
+  color: #4B5563;
+  font-size: 8px
+}
+
+.lunch-item .lunch-time {
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap
+}
+
+.lunch-item .lunch-loc {
   color: #9CA3AF;
-  margin-top: 3px
-}
-
-.lunch-item span {
-  font-size: 9px;
-  margin-top: 8px;
-  line-height: 1.45;
-  color: #D1D5DB
+  white-space: nowrap
 }
 
 .task-row {
@@ -1863,10 +1861,16 @@ body.tv-view .room-tag {
 }
 
 /* Daily Lunch Meet */
-body.tv-view .lunch-icon { width: 56px; height: 56px; font-size: 22px }
+body.tv-view .lunch-card { max-height: none }
+body.tv-view .lunch-item {
+  font-size: clamp(20px, 1vw, 22px);
+  column-gap: 10px;
+  padding: 10px 2px
+}
 body.tv-view .lunch-item b { font-size: clamp(22px, 1.1vw, 24px) }
-body.tv-view .lunch-item small { font-size: clamp(18px, .9vw, 20px) }
-body.tv-view .lunch-item span { font-size: clamp(18px, .9vw, 20px); line-height: 1.5 }
+body.tv-view .lunch-item .lunch-sep { font-size: clamp(16px, .8vw, 18px) }
+body.tv-view .lunch-item .lunch-time,
+body.tv-view .lunch-item .lunch-loc { font-size: clamp(20px, 1vw, 22px) }
 
 /* Tasks */
 body.tv-view .task-row {
