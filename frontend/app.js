@@ -231,13 +231,13 @@ async function setPage(page) {
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === page));
 
   const titles = {
-    dashboard:["Good Afternoon, Reema!","Here's your overview"],
+    dashboard:["Dashboard","Overview"],
     accounts:["Accounts","Receivables & Payables"],
     projects:["Projects","Projects Module"],
     cctv:["CCTV","CCTV Module"],
     data:["Data","Manage all information that feeds the dashboard"],
-    reports:["Reports","Profile Solutions Dashboard Analytics"],
-    settings:["Settings","Profile Solutions Dashboard Analytics"]
+    reports:["Reports","Profile Solution Dashboard Analytics"],
+    settings:["Settings","Profile Solution Dashboard Analytics"]
   };
   $("pageHeading").textContent = titles[page]?.[0] || page;
   $("pageSubheading").textContent = titles[page]?.[1] || "";

@@ -28,7 +28,7 @@ app.use(express.json({ limit: "2mb" }));
 app.get("/api/health", async (req, res, next) => {
   try {
     await query("select 1");
-    res.json({ status: "UP", service: "Profile Solutions Dashboard API", database: "connected" });
+    res.json({ status: "UP", service: "Profile Solution Dashboard API", database: "connected" });
   } catch (e) {
     next(e);
   }
@@ -66,7 +66,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, () => console.log(`Profile Solutions Dashboard API running on http://localhost:${port}`));
+app.listen(port, () => console.log(`Profile Solution Dashboard API running on http://localhost:${port}`));
 
 // Polls connected Google/Microsoft calendars every 5 minutes. This can later be
 // upgraded to Google "watch" channels / Microsoft Graph webhook subscriptions
