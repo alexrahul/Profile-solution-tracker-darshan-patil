@@ -40,3 +40,7 @@ INSERT INTO accounts_data(t_month,sales_order_amount,purchase_order_amount,invoi
 ('2026-08', 187.600000, 89.400000, 150.300000),
 ('2026-09', 195.250000, 93.800000, 157.900000)
 ON CONFLICT (t_month) DO NOTHING;
+
+
+
+
