@@ -1,5 +1,36 @@
 # Profile Solution Dashboard v2.5.0
 
+## v2.11 changes
+
+Fixes historical Google/Microsoft meetings not appearing on the dashboard -
+no layout, auth or data changes.
+
+- **Root cause**: the periodic calendar sync (`calendarSync.js`) only ever
+  keeps a rolling window from 1 day in the past through 30 days in the
+  future. A date further back than that was never fetched at all - not
+  cached-empty, genuinely never synced - so selecting e.g. 16 October 2026
+  always showed "No meetings" regardless of what actually exists in Google
+  Calendar, for every selected calendar including shared/subscribed "Other
+  calendars".
+- **Fix**: `ensureHistoricalCoverage()` backfills a requested date on demand,
+  the first time it's asked for, bounded to the single IST calendar month
+  containing it, across every selected/readable calendar on every active
+  connection. A new `calendar_sync_coverage` table
+  (`database/migrate_v2_11_calendar_historical_backfill.sql`) records which
+  (connection, calendar, month) windows have already been backfilled, so a
+  later visit to the same month is served from cache instead of re-fetching
+  live every time - wired into the dashboard, month-navigation and "View
+  All" meetings endpoints.
+- Reuses the same pagination, recurring-event expansion
+  (`/calendarView` for Microsoft, `singleEvents=true` for Google) and
+  duplicate-safe upsert as the regular sync, and computes the backfill
+  window's boundaries in IST (not a naive UTC month) so a meeting just after
+  midnight IST on the 1st, or just before midnight IST on the last day, is
+  never missed.
+- A backfill failure on one calendar (e.g. an expired token) is surfaced as a
+  distinct, non-fatal warning on the dashboard rather than silently looking
+  like "No meetings" - the rest of the dashboard still loads normally.
+
 ## v2.10 changes
 
 Calendar sync reliability and dashboard performance fixes - no layout, auth

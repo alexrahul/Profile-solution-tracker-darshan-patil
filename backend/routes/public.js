@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { query, pool } from "../db.js";
+import { ensureHistoricalCoverage } from "../services/calendarSync.js";
 
 const router = Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -114,6 +115,12 @@ const detailQueries = {
 router.get("/dashboard", async (req, res, next) => {
   try {
     const selectedDate = getDateParam(req);
+    // The periodic background sync only ever keeps a short rolling window
+    // (see calendarSync.js); a date older than that has never been fetched at
+    // all, not just "cached empty". Backfill it on demand - a no-op, cached
+    // read for any date already covered - before reading from the DB, so a
+    // historical date with real meetings doesn't show as "No meetings".
+    const { warnings: calendarSyncWarnings } = await ensureHistoricalCoverage(selectedDate);
 
     const [calendar, meetings, departments, manpowerImages, tasks, notes, reminders, calendarEvents] = await withConnection(client => Promise.all([
       client.query(
@@ -147,7 +154,11 @@ router.get("/dashboard", async (req, res, next) => {
       tasks: tasks.rows,
       notes: notes.rows,
       reminders: reminders.rows,
-      calendarEvents: calendarEvents.rows.map(toMeetingRow)
+      calendarEvents: calendarEvents.rows.map(toMeetingRow),
+      // Non-fatal: a backfill failure (e.g. an expired token on one
+      // connection) never blocks the rest of the dashboard from loading, but
+      // the frontend should still say so distinctly from "No meetings".
+      calendarSyncWarnings
     });
   } catch (err) {
     next(err);
@@ -185,6 +196,15 @@ router.get("/details/:module", async (req, res, next) => {
     const selectedDate = getDateParam(req);
     const config = detailQueries[req.params.module];
     if (!config) return res.status(404).json({ message: "Unknown detail module" });
+
+    let calendarSyncWarnings = [];
+    if (req.params.module === "meetings") {
+      // Usually a no-op by the time "View All" is opened (the dashboard's own
+      // load already backfilled this date), but this route can be hit on its
+      // own, so it needs the same on-demand historical backfill.
+      calendarSyncWarnings = (await ensureHistoricalCoverage(selectedDate)).warnings;
+    }
+
     const result = await query(config.sql, [selectedDate]);
 
     let rows = result.rows;
@@ -196,7 +216,7 @@ router.get("/details/:module", async (req, res, next) => {
       rows = rows.concat(calendarEvents.rows.map(toMeetingRow));
     }
 
-    res.json({ module: req.params.module, selectedDate, rows });
+    res.json({ module: req.params.module, selectedDate, rows, calendarSyncWarnings });
   } catch (err) {
     next(err);
   }
@@ -208,6 +228,10 @@ router.get("/calendar", async (req, res, next) => {
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ message: "month must be YYYY-MM" });
 
     const start = `${month}-01`;
+    // Browsing the Day Calendar to a past month must backfill that month too
+    // (not just selecting a specific date in it), so its event-indicator dots
+    // are correct before any date within it is ever clicked.
+    await ensureHistoricalCoverage(start);
     const result = await query(
       `select id,event_date as date,event_title as title,description
        from calendar_data

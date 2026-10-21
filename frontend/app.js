@@ -606,7 +606,17 @@ async function refreshDashboard({ silent = false, skipIfBusy = false } = {}) {
     const result = await api(`/api/public/dashboard?date=${encodeURIComponent(selectedDate)}`);
     if (requestId !== dashboardRequestSeq) return; // superseded - a newer request has already resolved or is in flight
     dashboardData = result;
-    notice.classList.add("hidden");
+    // A historical-backfill failure (e.g. an expired calendar token) is not
+    // fatal - the rest of the dashboard still rendered - but it must read as
+    // "couldn't refresh calendar data", not be silently indistinguishable
+    // from a genuine "No meetings" on this date.
+    const warnings = result.calendarSyncWarnings || [];
+    if (warnings.length) {
+      notice.classList.remove("hidden");
+      notice.textContent = "Some calendars couldn't be refreshed for this date: " + warnings.map(w => `${w.provider}${w.calendar ? ` (${w.calendar})` : ""} — ${w.message}`).join("; ");
+    } else {
+      notice.classList.add("hidden");
+    }
     renderDashboard();
   } catch (err) {
     if (requestId !== dashboardRequestSeq) return;

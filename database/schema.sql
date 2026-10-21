@@ -209,6 +209,19 @@ CREATE TABLE IF NOT EXISTS calendar_events(
  UNIQUE(calendar_connection_id,external_calendar_id,external_event_id)
 );
 
+-- Tracks which (connection, calendar, calendar-month) windows have already
+-- been fetched from the provider and cached in calendar_events, beyond the
+-- regular periodic sync's rolling window (today - SYNC_WINDOW_PAST_DAYS
+-- forward). Lets a historical date be backfilled once, on demand, and then
+-- served from cache on every later visit instead of re-fetching live each time.
+CREATE TABLE IF NOT EXISTS calendar_sync_coverage(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ calendar_connection_id UUID NOT NULL REFERENCES calendar_connections(id) ON DELETE CASCADE,
+ external_calendar_id VARCHAR(500) NOT NULL,
+ covered DATERANGE NOT NULL,
+ synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_dashboard_preferences_user ON dashboard_preferences(user_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_connections_user ON calendar_connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_selections_connection ON calendar_selections(calendar_connection_id);
@@ -222,6 +235,7 @@ CREATE INDEX IF NOT EXISTS idx_calendar_events_local_date ON calendar_events (
   (case when all_day then (start_time at time zone 'UTC')::date
         else (start_time at time zone 'Asia/Kolkata')::date end)
 );
+CREATE INDEX IF NOT EXISTS idx_calendar_sync_coverage_lookup ON calendar_sync_coverage(calendar_connection_id,external_calendar_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_data(event_date);
 CREATE INDEX IF NOT EXISTS idx_meeting_date ON meeting_schedule(meeting_date);
 CREATE INDEX IF NOT EXISTS idx_department_date ON department_schedule(schedule_date);

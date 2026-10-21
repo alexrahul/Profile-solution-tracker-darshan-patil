@@ -174,6 +174,135 @@ export async function syncConnection(connection) {
   return { synced: totalSynced, calendars: syncedCalendars, errors };
 }
 
+/* ------------------------------------------------------------------ *
+ * Historical backfill
+ *
+ * The periodic sync above only ever keeps a rolling window from
+ * SYNC_WINDOW_PAST_DAYS back through SYNC_WINDOW_FUTURE_DAYS forward - a date
+ * further in the past than that is never synced by it at all, so the
+ * dashboard would show "No meetings" for e.g. last month regardless of what
+ * actually exists in Google/Microsoft. ensureHistoricalCoverage() backfills
+ * such a date on demand, bounded to the single calendar month containing it,
+ * and records that month as covered so a later visit is served from cache
+ * instead of re-fetching live every time.
+ * ------------------------------------------------------------------ */
+
+// In-process de-dupe so two requests landing at the same moment for the same
+// (connection, calendar, month) - e.g. two browser tabs, or the dashboard and
+// the month-calendar endpoint firing together - share one fetch instead of
+// each starting their own.
+const backfillLocks = new Map();
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+// Everywhere else in the app treats the IST calendar day as the source of
+// truth (display, date filtering), so the backfill window must too - a
+// naive UTC-aligned month window would miss a meeting that falls just after
+// midnight IST on the 1st (still the previous UTC day) or just before
+// midnight IST on the last day (already the next UTC day).
+function monthRangeContaining(dateStr) {
+  const [y, m] = dateStr.split("-").map(Number);
+  const nextY = m === 12 ? y + 1 : y;
+  const nextM = m === 12 ? 1 : m + 1;
+
+  // Plain calendar-day boundaries (IST, timezone-agnostic) for the coverage
+  // bookkeeping - this is just "which dates have been backfilled", unrelated
+  // to any absolute instant.
+  const istStartDate = `${y}-${String(m).padStart(2, "0")}-01`;
+  const istEndDate = `${nextY}-${String(nextM).padStart(2, "0")}-01`;
+
+  // The same two boundaries re-expressed as the UTC instant they actually
+  // fall at (IST = UTC+5:30), for the provider fetch and the delete-sweep
+  // window, which both operate on absolute instants, not calendar dates.
+  const fetchStart = new Date(Date.UTC(y, m - 1, 1) - IST_OFFSET_MS);
+  const fetchEnd = new Date(Date.UTC(nextY, nextM - 1, 1) - IST_OFFSET_MS);
+
+  return { istStartDate, istEndDate, fetchStart, fetchEnd };
+}
+
+async function isDateCovered(connectionId, calendarId, dateStr) {
+  const { rows } = await query(
+    `select 1 from calendar_sync_coverage
+     where calendar_connection_id=$1 and external_calendar_id=$2 and covered @> $3::date limit 1`,
+    [connectionId, calendarId, dateStr]
+  );
+  return rows.length > 0;
+}
+
+async function recordCoverage(connectionId, calendarId, istStartDate, istEndDate) {
+  await query(
+    `insert into calendar_sync_coverage(calendar_connection_id,external_calendar_id,covered)
+     values($1,$2,daterange($3::date,$4::date,'[)'))`,
+    [connectionId, calendarId, istStartDate, istEndDate]
+  );
+}
+
+async function backfillCalendarMonth(connection, accessToken, sel, dateStr) {
+  if (await isDateCovered(connection.id, sel.external_calendar_id, dateStr)) return null;
+
+  const { istStartDate, istEndDate, fetchStart, fetchEnd } = monthRangeContaining(dateStr);
+  try {
+    const events = await fetchEventsForCalendar(connection.provider, accessToken, sel.external_calendar_id, fetchStart, fetchEnd);
+    await replaceCalendarEvents(connection.id, sel.external_calendar_id, events, fetchStart, fetchEnd);
+    await recordCoverage(connection.id, sel.external_calendar_id, istStartDate, istEndDate);
+    await query(`update calendar_selections set last_sync_error=null where id=$1`, [sel.id]);
+    return null;
+  } catch (err) {
+    console.error(`[calendar-backfill] ${connection.provider} calendar "${sel.calendar_name}" (${sel.external_calendar_id}) for ${dateStr.slice(0, 7)} failed:`, err.message);
+    await query(`update calendar_selections set last_sync_error=$1 where id=$2`, [err.message, sel.id]);
+    return { provider: connection.provider, calendar: sel.calendar_name, message: err.message };
+  }
+}
+
+// Backfills every active connection's selected, readable calendars for the
+// month containing `dateStr`, but only when that date falls outside the
+// regular rolling sync window - dates already covered by the periodic sync
+// are left alone (no live call, no latency added to the common case). A
+// backfill failure (e.g. an expired token) is collected as a warning rather
+// than thrown, so it never blocks the rest of the dashboard from loading.
+export async function ensureHistoricalCoverage(dateStr) {
+  const rollingFloor = new Date(Date.now() - SYNC_WINDOW_PAST_DAYS * 24 * 60 * 60 * 1000);
+  const requested = new Date(`${dateStr}T00:00:00.000Z`);
+  if (requested >= rollingFloor) return { warnings: [] };
+
+  const { rows: connections } = await query(`select * from calendar_connections where is_active=true`);
+  const warnings = [];
+
+  for (const connection of connections) {
+    let accessToken;
+    try {
+      accessToken = await ensureFreshAccessToken(connection);
+    } catch (err) {
+      warnings.push({ provider: connection.provider, message: `Could not refresh access for historical sync: ${err.message}` });
+      continue;
+    }
+
+    const { rows: selections } = await query(
+      `select * from calendar_selections where calendar_connection_id=$1 and selected=true`,
+      [connection.id]
+    );
+
+    for (const sel of selections) {
+      // freeBusyReader-only shares can't have their event details read at
+      // all (matches the same check the regular periodic sync applies).
+      if (sel.access_role === "freeBusyReader") continue;
+
+      const key = `${connection.id}:${sel.external_calendar_id}:${dateStr.slice(0, 7)}`;
+      let task = backfillLocks.get(key);
+      if (!task) {
+        task = backfillCalendarMonth(connection, accessToken, sel, dateStr);
+        backfillLocks.set(key, task);
+        task.finally(() => backfillLocks.delete(key));
+      }
+
+      const warning = await task;
+      if (warning) warnings.push(warning);
+    }
+  }
+
+  return { warnings };
+}
+
 // Applies a new set of selected calendar ids, drops cached events for any
 // calendar the admin just deselected (so stale entries don't linger in Meeting
 // Schedule), then re-syncs so newly-selected calendars populate immediately.
