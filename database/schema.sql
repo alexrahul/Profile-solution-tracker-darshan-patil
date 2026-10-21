@@ -214,6 +214,14 @@ CREATE INDEX IF NOT EXISTS idx_calendar_connections_user ON calendar_connections
 CREATE INDEX IF NOT EXISTS idx_calendar_selections_connection ON calendar_selections(calendar_connection_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_connection ON calendar_events(calendar_connection_id);
+-- Matches the exact expression public.js's dashboard query filters on (the
+-- IST calendar day for timed events, the bare UTC-anchored day for all-day
+-- ones) so that lookup can use an index scan instead of evaluating the
+-- timezone conversion against every row on every request.
+CREATE INDEX IF NOT EXISTS idx_calendar_events_local_date ON calendar_events (
+  (case when all_day then (start_time at time zone 'UTC')::date
+        else (start_time at time zone 'Asia/Kolkata')::date end)
+);
 CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_data(event_date);
 CREATE INDEX IF NOT EXISTS idx_meeting_date ON meeting_schedule(meeting_date);
 CREATE INDEX IF NOT EXISTS idx_department_date ON department_schedule(schedule_date);

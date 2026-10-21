@@ -8,6 +8,15 @@ import { syncConnection, listCalendarsForConnection, updateCalendarSelections } 
 
 const router = Router();
 
+// A rejected/revoked refresh token can surface either as our own
+// ensureFreshAccessToken() err.code ("invalid_grant", when no refresh token is
+// stored at all) or as the provider's own OAuth error on err.providerError
+// (when the provider itself rejects the refresh call) - both mean the same
+// thing: the connection needs to be reconnected from Settings.
+function isExpiredGrantError(err) {
+  return err.code === "invalid_grant" || err.providerError === "invalid_grant";
+}
+
 function jwtSecret() {
   return process.env.JWT_SECRET;
 }
@@ -129,6 +138,10 @@ router.post("/connections/:id/sync", requireAdmin, async (req, res, next) => {
     const result = await syncConnection(connection);
     res.json(result);
   } catch (err) {
+    if (isExpiredGrantError(err)) {
+      await query(`update calendar_connections set is_active=false where id=$1`, [req.params.id]);
+      return res.status(409).json({ message: "This calendar connection has expired. Reconnect it from Settings.", code: "RECONNECT_REQUIRED" });
+    }
     next(err);
   }
 });
@@ -149,7 +162,7 @@ router.get("/connections/:id/calendars", requireAdmin, async (req, res, next) =>
     const calendars = await listCalendarsForConnection(connection);
     res.json({ calendars });
   } catch (err) {
-    if (err.code === "invalid_grant") {
+    if (isExpiredGrantError(err)) {
       await query(`update calendar_connections set is_active=false where id=$1`, [req.params.id]);
       return res.status(409).json({ message: "This calendar connection has expired. Reconnect it from Settings.", code: "RECONNECT_REQUIRED" });
     }
@@ -179,6 +192,10 @@ router.put("/connections/:id/calendars", requireAdmin, async (req, res, next) =>
     );
     res.json({ ...syncResult, calendars: calendars.rows });
   } catch (err) {
+    if (isExpiredGrantError(err)) {
+      await query(`update calendar_connections set is_active=false where id=$1`, [req.params.id]);
+      return res.status(409).json({ message: "This calendar connection has expired. Reconnect it from Settings.", code: "RECONNECT_REQUIRED" });
+    }
     next(err);
   }
 });

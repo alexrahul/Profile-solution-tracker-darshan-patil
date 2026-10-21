@@ -1257,6 +1257,12 @@ td {
   text-transform: capitalize
 }
 
+.calendar-list-synced {
+  grid-column: 2 / span 2;
+  font-size: 8px;
+  color: #6B7A90
+}
+
 .calendar-list-error {
   grid-column: 2 / span 2;
   font-size: 8px;

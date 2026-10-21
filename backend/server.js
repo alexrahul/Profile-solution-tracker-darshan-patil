@@ -71,6 +71,31 @@ app.listen(port, () => console.log(`Profile Solution Dashboard API running on ht
 // Polls connected Google/Microsoft calendars every 5 minutes. This can later be
 // upgraded to Google "watch" channels / Microsoft Graph webhook subscriptions
 // for push-based near-instant sync instead of polling.
-setInterval(() => {
-  syncAllActiveConnections().catch(err => console.error("[calendar-sync] batch sync failed:", err.message));
-}, 5 * 60 * 1000);
+//
+// A plain setInterval would start an overlapping run if one sync cycle ever
+// takes longer than 5 minutes (several connections, many selected calendars,
+// a slow provider) - doubling outbound API calls and DB load. This instead
+// self-reschedules only after the previous run finishes, and a syncRunning
+// guard drops any run that would otherwise overlap. It also runs once
+// immediately on startup so calendar data isn't stale for up to 5 minutes
+// after every deploy/restart.
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+let syncRunning = false;
+
+async function runCalendarSync() {
+  if (syncRunning) {
+    console.warn("[calendar-sync] previous run still in progress; skipping this tick");
+    return;
+  }
+  syncRunning = true;
+  try {
+    await syncAllActiveConnections();
+  } catch (err) {
+    console.error("[calendar-sync] batch sync failed:", err.message);
+  } finally {
+    syncRunning = false;
+  }
+}
+
+runCalendarSync();
+setInterval(runCalendarSync, SYNC_INTERVAL_MS);

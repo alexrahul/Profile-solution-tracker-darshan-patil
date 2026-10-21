@@ -23,7 +23,12 @@ const GOOGLE = {
 const MICROSOFT = {
   authUrl: () => `https://login.microsoftonline.com/${process.env.MS_TENANT_ID || "common"}/oauth2/v2.0/authorize`,
   tokenUrl: () => `https://login.microsoftonline.com/${process.env.MS_TENANT_ID || "common"}/oauth2/v2.0/token`,
-  eventsUrl: "https://graph.microsoft.com/v1.0/me/events",
+  // /calendarView (not /events) - it's the endpoint that expands a recurring
+  // series into its individual occurrences within a date range. /events with a
+  // $filter on start/dateTime only ever matches a recurring series' master
+  // record (its own anchor date), so recurring meetings were effectively
+  // missing or showing on the wrong date.
+  calendarViewUrl: "https://graph.microsoft.com/v1.0/me/calendarView",
   userInfoUrl: "https://graph.microsoft.com/v1.0/me",
   scope: "offline_access Calendars.Read User.Read",
   clientId: () => process.env.MS_CLIENT_ID,
@@ -255,13 +260,16 @@ async function fetchGoogleEventsForCalendar(accessToken, calendarId, timeMin, ti
 
 async function fetchMicrosoftEventsForCalendar(accessToken, calendarId, timeMin, timeMax) {
   const rawEvents = [];
+  // calendarView takes the window as dedicated query params (no $filter) and
+  // returns one row per occurrence for recurring series, already expanded and
+  // ordered by start time - the Graph equivalent of Google's singleEvents=true.
   let url = (() => {
     const params = new URLSearchParams({
-      $filter: `start/dateTime ge '${timeMin.toISOString()}' and end/dateTime le '${timeMax.toISOString()}'`,
-      $orderby: "start/dateTime",
+      startDateTime: timeMin.toISOString(),
+      endDateTime: timeMax.toISOString(),
       $top: "250"
     });
-    return `${MICROSOFT.eventsUrl}?${params.toString()}`;
+    return `${MICROSOFT.calendarViewUrl}?${params.toString()}`;
   })();
   const headers = { Authorization: `Bearer ${accessToken}`, Prefer: 'outlook.timezone="UTC"' };
 

@@ -1,5 +1,53 @@
 # Profile Solution Dashboard v2.5.0
 
+## v2.10 changes
+
+Calendar sync reliability and dashboard performance fixes - no layout, auth
+or data changes.
+
+- **Connection-pool exhaustion fixed**: `/api/public/dashboard` and
+  `/api/public/reports` each fanned out to 8 concurrent queries via
+  `Promise.all`, grabbing 8 separate pool connections per request. With a few
+  open dashboard tabs (each auto-polling every 30s) plus the background
+  calendar sync, this routinely exhausted the database's session-pooler
+  connection cap, surfacing as the dashboard being slow or unresponsive
+  (confirmed by reproducing the pool's `EMAXCONNSESSION` error directly).
+  Both routes now run their batch of queries against a single checked-out
+  connection instead.
+- **Microsoft recurring meetings fixed**: sync was calling `/me/events` with
+  a `$filter` on `start/dateTime`, which only ever matches a recurring
+  series' own master record, not its individual occurrences - recurring
+  Microsoft meetings were effectively missing or on the wrong date. Switched
+  to `/me/calendarView`, the Graph endpoint that expands recurring series
+  into occurrences within a date range (the equivalent of Google's
+  `singleEvents=true`).
+- **Overlapping background syncs fixed**: the 5-minute sync poll had no
+  overlap guard and no immediate run on startup, so a slow sync cycle (many
+  connections/calendars, slow provider) could start a second concurrent run,
+  doubling outbound API calls and DB load. It now guards against overlap and
+  runs once immediately on startup too, so data isn't stale for up to 5
+  minutes after every deploy.
+- **All-day event date matching hardened**: the dashboard's calendar-event
+  query cast an all-day event's timestamp to a date with a bare `::date`,
+  which silently follows the database session's default timezone rather than
+  guaranteed UTC. Now explicit (`at time zone 'UTC'`), with a matching
+  expression index added (`idx_calendar_events_local_date`,
+  `database/migrate_v2_10_calendar_sync_fixes.sql`) so the lookup can use an
+  index scan.
+- **Dashboard date-change races fixed**: switching dates/months quickly could
+  have an earlier, slower request's response land after a newer one and
+  overwrite it - or get silently dropped entirely by a simple in-flight
+  boolean guard. Replaced with a request-sequence check so only the latest
+  request's response is ever applied. Date changes and month navigation now
+  also fire their independent requests in parallel instead of one after another.
+- **"Last synced" time added**: Settings → Manage Calendars now shows each
+  selected calendar's last successful sync time (or "Not yet synced"),
+  alongside its existing per-calendar sync error if any. A manual "Sync Now"
+  also now refreshes the live Dashboard (previously only the month-view
+  calendar dots updated; the Meeting Schedule card needed a full page reload
+  or the next 30s poll to catch up) and refreshes an open Manage Calendars
+  panel in place.
+
 ## v2.9.1 changes
 
 - App-wide dark scrollbars: every scrollable region (main page, tables,

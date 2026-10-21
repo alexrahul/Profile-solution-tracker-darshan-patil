@@ -12,7 +12,13 @@ let editingId = null;
 let selectedDate = localStorage.getItem("ps_selected_date") || localToday();
 let calendarCursor = dateFromYmd(selectedDate);
 let calendarMonthEvents = [];
-let refreshInFlight = false;
+// Monotonically-increasing request ids, not plain booleans, so a response
+// that's no longer the latest request (superseded by a faster-returning later
+// one, e.g. rapid date/month clicks) is detected and discarded instead of
+// either blocking the newer request or being allowed to overwrite its result.
+let dashboardRequestSeq = 0;
+let dashboardFetchInFlight = false;
+let calendarMonthRequestSeq = 0;
 let manpowerImageIndex = 0;
 let inlineImageZoom = 1;
 let imageZoom = 1;
@@ -96,20 +102,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderTvView();
 
   if (!hideDashboard) {
-    await refreshCalendarMonthEvents();
-    await refreshDashboard();
+    await Promise.all([refreshCalendarMonthEvents(), refreshDashboard()]);
   } else {
     renderCalendar();
   }
 
   setInterval(() => {
     if (currentPage === "dashboard" && !document.hidden && !hideDashboard) {
-      refreshDashboard({ silent: true });
+      refreshDashboard({ silent: true, skipIfBusy: true });
     }
   }, 30000);
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && currentPage === "dashboard" && !hideDashboard) refreshDashboard({ silent: true });
+    if (!document.hidden && currentPage === "dashboard" && !hideDashboard) refreshDashboard({ silent: true, skipIfBusy: true });
   });
 });
 
@@ -317,7 +322,7 @@ function updateCalendarProviderUI(provider, connection) {
     syncBtn.classList.remove("hidden");
     syncBtn.disabled = false;
     syncBtn.textContent = "Sync Now";
-    syncBtn.onclick = () => syncCalendarNow(connection.id, syncBtn);
+    syncBtn.onclick = () => syncCalendarNow(connection.id, syncBtn, provider);
     manageBtn.classList.remove("hidden");
     manageBtn.onclick = () => toggleCalendarManage(provider, connection.id);
   } else {
@@ -344,6 +349,14 @@ async function toggleCalendarManage(provider, connectionId) {
     return;
   }
 
+  await loadCalendarManagePanel(provider, connectionId);
+}
+
+// Separated from the toggle above so a manual "Sync Now" can refresh an
+// already-open panel's per-calendar last-synced/error details in place,
+// without the hide-then-reopen flicker of calling the toggle twice.
+async function loadCalendarManagePanel(provider, connectionId) {
+  const panel = $(`${provider}CalendarList`);
   panel.classList.remove("hidden");
   panel.innerHTML = `<p class="calendar-list-loading">Loading calendars…</p>`;
   try {
@@ -368,6 +381,7 @@ function renderCalendarList(provider, connectionId, calendars) {
           <input type="checkbox" data-cal-id="${escAttr(c.external_calendar_id)}" ${c.selected ? "checked" : ""} ${c.readable === false ? "disabled" : ""}>
           <span class="calendar-list-name">${esc(c.calendar_name || c.external_calendar_id)}${c.is_primary ? " <em>(Primary)</em>" : ""}</span>
           <span class="calendar-list-role">${esc(c.access_role || "")}</span>
+          ${c.selected ? `<span class="calendar-list-synced">${c.last_synced_at ? `Last synced ${esc(formatSyncTimestamp(c.last_synced_at))}` : "Not yet synced"}</span>` : ""}
           ${c.last_sync_error ? `<span class="calendar-list-error">${esc(c.last_sync_error)}</span>` : ""}
         </label>`).join("")}
     </div>
@@ -388,15 +402,14 @@ function renderCalendarList(provider, connectionId, calendars) {
       renderCalendarList(provider, connectionId, result.calendars || []);
       const errCount = (result.errors || []).length;
       $(`${provider}CalendarSaveStatus`).textContent = `Saved. Synced ${result.synced} event${result.synced === 1 ? "" : "s"} across ${result.calendars} calendar${result.calendars === 1 ? "" : "s"}${errCount ? ` — ${errCount} calendar${errCount === 1 ? "" : "s"} had errors (see below).` : "."}`;
-      await refreshCalendarMonthEvents();
-      if (!hideDashboard) await refreshDashboard({ silent: true });
+      await Promise.all([refreshCalendarMonthEvents(), refreshDashboard({ silent: true })]);
     } catch (err) {
       statusEl.textContent = err.message;
     }
   };
 }
 
-async function syncCalendarNow(id, syncBtn) {
+async function syncCalendarNow(id, syncBtn, provider) {
   const msg = $("calendarConnectMessage");
   syncBtn.disabled = true;
   syncBtn.textContent = "Syncing...";
@@ -408,7 +421,16 @@ async function syncCalendarNow(id, syncBtn) {
     msg.textContent = errCount
       ? `Synced ${result.synced} event${result.synced === 1 ? "" : "s"} across ${result.calendars} calendar${result.calendars === 1 ? "" : "s"}, but ${errCount} calendar${errCount === 1 ? "" : "s"} failed: ${result.errors.map(e => e.calendar).join(", ")}.`
       : `Synced ${result.synced} event${result.synced === 1 ? "" : "s"} across ${result.calendars} calendar${result.calendars === 1 ? "" : "s"} just now.`;
-    await refreshCalendarMonthEvents();
+    // Refresh the actual dashboard too, not just the month-view dots - otherwise
+    // a manual sync only shows up on the Dashboard page after the next 30s poll
+    // or a full page reload.
+    await Promise.all([refreshCalendarMonthEvents(), refreshDashboard({ silent: true })]);
+    // If "Manage Calendars" is open for this provider, refresh its per-calendar
+    // last-synced/error details too instead of leaving them at pre-sync values.
+    const listPanel = provider && $(`${provider}CalendarList`);
+    if (listPanel && !listPanel.classList.contains("hidden")) {
+      await loadCalendarManagePanel(provider, id);
+    }
   } catch (err) {
     msg.classList.remove("hidden");
     msg.className = "calendar-connect-message form-error";
@@ -520,8 +542,7 @@ function setupDashboardVisibility() {
     }
 
     if (!hideDashboard && currentPage === "dashboard") {
-      await refreshCalendarMonthEvents();
-      await refreshDashboard();
+      await Promise.all([refreshCalendarMonthEvents(), refreshDashboard()]);
     }
   };
 }
@@ -566,23 +587,36 @@ function renderDashboardVisibility() {
   $("dashboardHiddenMessage")?.classList.toggle("hidden", !hideDashboard);
 }
 
-async function refreshDashboard({ silent = false } = {}) {
-  if (hideDashboard || refreshInFlight) return;
-  refreshInFlight = true;
+// skipIfBusy is for the routine background pollers (30s timer, tab refocus) -
+// they can afford to wait for the next tick rather than piling up a parallel
+// request. A direct, user-caused refresh (date change, save, sync) never sets
+// it, so it always fires immediately regardless of what's already in flight.
+// Either way, whichever request resolves LAST wins: every response checks it's
+// still the newest request before touching the DOM, so a slower, now-stale
+// response can never clobber a faster, more recent one.
+async function refreshDashboard({ silent = false, skipIfBusy = false } = {}) {
+  if (hideDashboard) return;
+  if (skipIfBusy && dashboardFetchInFlight) return;
+
+  const requestId = ++dashboardRequestSeq;
+  dashboardFetchInFlight = true;
   const notice = $("apiNotice");
 
   try {
-    dashboardData = await api(`/api/public/dashboard?date=${encodeURIComponent(selectedDate)}`);
+    const result = await api(`/api/public/dashboard?date=${encodeURIComponent(selectedDate)}`);
+    if (requestId !== dashboardRequestSeq) return; // superseded - a newer request has already resolved or is in flight
+    dashboardData = result;
     notice.classList.add("hidden");
     renderDashboard();
   } catch (err) {
+    if (requestId !== dashboardRequestSeq) return;
     if (!silent) {
       notice.classList.remove("hidden");
       notice.textContent = "Dashboard API is not connected yet. Configure frontend/config.js and start the Node.js API. " + err.message;
     }
     renderEmptyDashboard();
   } finally {
-    refreshInFlight = false;
+    if (requestId === dashboardRequestSeq) dashboardFetchInFlight = false;
   }
 }
 
@@ -648,11 +682,19 @@ function renderMeetingRow(m) {
 async function refreshCalendarMonthEvents() {
   if (hideDashboard) return;
   const month = `${calendarCursor.getFullYear()}-${String(calendarCursor.getMonth() + 1).padStart(2, "0")}`;
+  const requestId = ++calendarMonthRequestSeq;
+  let events;
   try {
-    calendarMonthEvents = await api(`/api/public/calendar?month=${encodeURIComponent(month)}`);
+    events = await api(`/api/public/calendar?month=${encodeURIComponent(month)}`);
   } catch {
-    calendarMonthEvents = [];
+    events = [];
   }
+  // Rapid prev/next clicks can have an earlier month's request resolve after a
+  // later one (out-of-order network responses) - only the latest request may
+  // still apply its result, so a stale month never overwrites the one the
+  // calendar has since moved on to.
+  if (requestId !== calendarMonthRequestSeq) return;
+  calendarMonthEvents = events;
   renderCalendar();
 }
 
@@ -706,8 +748,10 @@ async function selectDashboardDate(date) {
   calendarCursor = dateFromYmd(selectedDate);
   updateDateLabels();
   renderCalendar();
-  await refreshCalendarMonthEvents();
-  await refreshDashboard();
+  // Independent requests (different endpoints, different data) - run them
+  // together instead of one-after-another so a date click doesn't pay two
+  // sequential round-trips' worth of latency.
+  await Promise.all([refreshCalendarMonthEvents(), refreshDashboard()]);
 }
 
 function setupCalendarButtons() {
@@ -1060,8 +1104,7 @@ async function saveRecord(e) {
     renderDataForm();
     await loadRecords();
     if (!hideDashboard) {
-      await refreshCalendarMonthEvents();
-      await refreshDashboard({ silent: true });
+      await Promise.all([refreshCalendarMonthEvents(), refreshDashboard({ silent: true })]);
     }
   } catch (err) {
     $("formMessage").className = "form-error";
@@ -1102,8 +1145,7 @@ async function deleteRecord(id) {
     $("formMessage").textContent = "Record deleted successfully.";
     await loadRecords();
     if (!hideDashboard) {
-      await refreshCalendarMonthEvents();
-      await refreshDashboard({ silent: true });
+      await Promise.all([refreshCalendarMonthEvents(), refreshDashboard({ silent: true })]);
     }
   } catch (err) {
     $("formMessage").className = "form-error";
@@ -1152,8 +1194,7 @@ async function bulkUpload() {
     $("bulkFile").value = "";
     await loadRecords();
     if (!hideDashboard) {
-      await refreshCalendarMonthEvents();
-      await refreshDashboard({ silent: true });
+      await Promise.all([refreshCalendarMonthEvents(), refreshDashboard({ silent: true })]);
     }
   } catch (err) {
     $("formMessage").className = "form-error";
@@ -1177,6 +1218,14 @@ function formatDashboardDate(value) {
   const day = String(d.getDate()).padStart(2, "0");
   const month = d.toLocaleDateString("en-US", { month: "short" });
   return `${day}-${month}-${d.getFullYear()}`;
+}
+const syncTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true
+});
+function formatSyncTimestamp(isoValue) {
+  const d = new Date(isoValue);
+  if (Number.isNaN(d.getTime())) return "";
+  return syncTimestampFormatter.format(d) + " IST";
 }
 function localToday() {
   const d = new Date();

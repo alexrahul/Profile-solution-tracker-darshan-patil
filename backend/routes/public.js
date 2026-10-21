@@ -1,8 +1,26 @@
 import { Router } from "express";
-import { query } from "../db.js";
+import { query, pool } from "../db.js";
 
 const router = Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Runs a batch of queries against a single checked-out connection instead of
+// pool.query()-per-call. A route that fans out N queries via Promise.all
+// (dashboard, reports) previously grabbed N separate pool connections for one
+// request - with a handful of concurrently open dashboard tabs plus the
+// background calendar sync, that routinely exhausted the provider's session
+// pooler (capped well below what N-per-request x multiple tabs needs),
+// surfacing as the app being slow or unresponsive. One connection per
+// request fixes that; node-postgres queues queries issued on the same client
+// and runs them in order, so Promise.all still resolves each in turn.
+async function withConnection(fn) {
+  const client = await pool.connect();
+  try {
+    return await fn(client);
+  } finally {
+    client.release();
+  }
+}
 
 // Meeting Schedule always displays in India time, independent of the browser's
 // or the server/database session's local timezone. calendar_events.start_time
@@ -40,11 +58,14 @@ const calendarEventsSql = `
    and cs.external_calendar_id = ce.external_calendar_id
   where cc.is_active = true
     -- All-day events are stored as a bare UTC-midnight-anchored calendar date
-    -- (no real timezone attached) and must keep that date as-is. Timed events
-    -- are matched by their India calendar date, same as they're displayed -
-    -- so a meeting just after midnight IST still falls under the right day
-    -- even if the DB/session default timezone is UTC.
-    and (case when ce.all_day then ce.start_time::date
+    -- (no real timezone attached) and must keep that date as-is - cast via
+    -- "at time zone 'UTC'" explicitly rather than a bare ::date, which would
+    -- silently follow the connection's session timezone (not guaranteed to be
+    -- UTC) and could shift an all-day event onto the wrong calendar day. Timed
+    -- events are matched by their India calendar date, same as they're
+    -- displayed - so a meeting just after midnight IST still falls under the
+    -- right day regardless of the DB/session default timezone.
+    and (case when ce.all_day then (ce.start_time at time zone 'UTC')::date
               else (ce.start_time at time zone 'Asia/Kolkata')::date end) = $1::date
   order by ce.start_time`;
 
@@ -94,28 +115,28 @@ router.get("/dashboard", async (req, res, next) => {
   try {
     const selectedDate = getDateParam(req);
 
-    const [calendar, meetings, departments, manpowerImages, tasks, notes, reminders, calendarEvents] = await Promise.all([
-      query(
+    const [calendar, meetings, departments, manpowerImages, tasks, notes, reminders, calendarEvents] = await withConnection(client => Promise.all([
+      client.query(
         `select id,event_date as date,event_title as title,description
          from calendar_data where event_date=$1 order by created_at,id`,
         [selectedDate]
       ),
-      query(detailQueries.meetings.sql, [selectedDate]),
-      query(
+      client.query(detailQueries.meetings.sql, [selectedDate]),
+      client.query(
         `select id,schedule_date as date,department_name as department,start_time as start,end_time as "end",location
          from department_schedule where schedule_date=$1 order by sort_order,created_at,id`,
         [selectedDate]
       ),
-      query(
+      client.query(
         `select id,"date",image_url,title,description,created_at
          from manpower_images where "date"=$1 order by created_at,id`,
         [selectedDate]
       ),
-      query(detailQueries.tasks.sql, [selectedDate]),
-      query(detailQueries.notes.sql, [selectedDate]),
-      query(detailQueries.reminders.sql, [selectedDate]),
-      query(calendarEventsSql, [selectedDate])
-    ]);
+      client.query(detailQueries.tasks.sql, [selectedDate]),
+      client.query(detailQueries.notes.sql, [selectedDate]),
+      client.query(detailQueries.reminders.sql, [selectedDate]),
+      client.query(calendarEventsSql, [selectedDate])
+    ]));
 
     res.json({
       selectedDate,
@@ -208,16 +229,16 @@ router.get("/reports", async (req, res, next) => {
       ? String(req.query.date)
       : new Date().toISOString().slice(0, 10);
 
-    const [i, a, t, n, r, m, d, c] = await Promise.all([
-      query('select count(*)::int count from manpower_images where "date"=$1', [selectedDate]),
-      query("select count(*)::int count from attendance_data where reading_date=$1", [selectedDate]),
-      query("select count(*)::int count from tasks_data where task_date=$1", [selectedDate]),
-      query("select count(*)::int count from notes_data where note_date=$1", [selectedDate]),
-      query("select count(*)::int count from reminders_data where reminder_date=$1", [selectedDate]),
-      query("select count(*)::int count from meeting_schedule where meeting_date=$1", [selectedDate]),
-      query("select count(*)::int count from department_schedule where schedule_date=$1", [selectedDate]),
-      query("select count(*)::int count from calendar_data where event_date=$1", [selectedDate])
-    ]);
+    const [i, a, t, n, r, m, d, c] = await withConnection(client => Promise.all([
+      client.query('select count(*)::int count from manpower_images where "date"=$1', [selectedDate]),
+      client.query("select count(*)::int count from attendance_data where reading_date=$1", [selectedDate]),
+      client.query("select count(*)::int count from tasks_data where task_date=$1", [selectedDate]),
+      client.query("select count(*)::int count from notes_data where note_date=$1", [selectedDate]),
+      client.query("select count(*)::int count from reminders_data where reminder_date=$1", [selectedDate]),
+      client.query("select count(*)::int count from meeting_schedule where meeting_date=$1", [selectedDate]),
+      client.query("select count(*)::int count from department_schedule where schedule_date=$1", [selectedDate]),
+      client.query("select count(*)::int count from calendar_data where event_date=$1", [selectedDate])
+    ]));
 
     res.json({
       type,
